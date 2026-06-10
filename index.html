@@ -644,10 +644,10 @@ const Auth = {
     return false;
   },
 
-  async _api(method, path, body) {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
-      method, headers: { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined
-    });
+  async _api(method, path, body, needAuth) {
+    const headers = { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' };
+    if (needAuth && this._session) headers['Authorization'] = `Bearer ${this._session.access_token}`;
+    const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
     if (!res.ok) { const t = await res.text(); throw new Error(t); }
     return res.json();
   },
@@ -706,8 +706,8 @@ const Auth = {
   },
 
   async changePassword(newPassword) {
-    if (!this._session) return false;
-    const r = await this._api('PUT', '/user', { password: newPassword });
+    if (!this._session) throw new Error('未登录');
+    await this._api('PUT', '/user', { password: newPassword }, true);
     return true;
   }
 };
