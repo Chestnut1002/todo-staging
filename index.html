@@ -745,9 +745,16 @@ const App = {
     const prevSync = localStorage.getItem(SYNC_KEY+'_code');
     if (prevSync) {
       await Cloud.init();
+      const ok = await Cloud.fullSync();
       document.getElementById('syncStatus').style.display='';
-      document.getElementById('syncStatus').textContent = '☁️ 已同步';
-      document.getElementById('syncStatus').classList.remove('offline');
+      if (ok) {
+        document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
+        document.getElementById('syncStatus').classList.remove('offline');
+        Cloud.startRealtime();
+      } else {
+        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
+        document.getElementById('syncStatus').classList.add('offline');
+      }
     }
 
     // 视图切换
@@ -825,18 +832,44 @@ const App = {
       localStorage.setItem(SYNC_KEY+'_code', c);
       overlay.style.display = 'none';
       document.getElementById('syncStatus').style.display = '';
-      document.getElementById('syncStatus').textContent = '☁️ 已同步';
-      document.getElementById('syncStatus').classList.remove('offline');
-      try { await Cloud.init(); await Cloud.syncDown(); } catch(e) {}
+      try {
+        await Cloud.init();
+        const ok = await Cloud.fullSync();
+        if (ok) {
+          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
+          document.getElementById('syncStatus').classList.remove('offline');
+          Cloud.startRealtime();
+          TaskList.load(); Calendar.refresh();
+        } else {
+          document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
+          document.getElementById('syncStatus').classList.add('offline');
+        }
+      } catch(e) {
+        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
+        document.getElementById('syncStatus').classList.add('offline');
+      }
     });
-    document.getElementById('syncCreate').addEventListener('click', () => {
+    document.getElementById('syncCreate').addEventListener('click', async () => {
       const c = Cloud.generateCode();
       document.getElementById('syncCodeInput').value = c;
       localStorage.setItem(SYNC_KEY+'_code', c);
       overlay.style.display = 'none';
       document.getElementById('syncStatus').style.display = '';
-      document.getElementById('syncStatus').textContent = '☁️ 已同步';
-      document.getElementById('syncStatus').classList.remove('offline');
+      try {
+        await Cloud.init();
+        const ok = await Cloud.fullSync();
+        if (ok) {
+          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
+          document.getElementById('syncStatus').classList.remove('offline');
+          Cloud.startRealtime();
+        } else {
+          document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
+          document.getElementById('syncStatus').classList.add('offline');
+        }
+      } catch(e) {
+        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
+        document.getElementById('syncStatus').classList.add('offline');
+      }
     });
   },
 
