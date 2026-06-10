@@ -669,11 +669,22 @@ const Auth = {
 
   async registerEmail(email, password) {
     const r = await this._api('POST', '/signup', { email, password });
-    // Supabase may return user even without email confirmation
-    if (r.user) {
-      // Auto-login after signup
-      return this.loginEmail(email, password);
+    // Supabase returns user directly: { id, email, ... } or { user: {...}, session: {...} }
+    const user = r.user || (r.id ? r : null);
+    if (user) {
+      // 尝试自动登录（如果邮箱确认已关闭则直接成功）
+      try {
+        return await this.loginEmail(email, password);
+      } catch(e) {
+        // 如果邮箱确认开启，登录会失败。提示用户查收邮件。
+        throw new Error('请查收确认邮件后重试');
+      }
     }
+    throw new Error('注册失败');
+  },
+
+  async forgotPassword(email) {
+    await this._api('POST', '/recover', { email });
     return true;
   },
 
@@ -862,12 +873,13 @@ const App = {
     const d = document.getElementById('authDialog');
     d.innerHTML = `
       <h2>🌰 toDoliSt</h2>
-      <div class="subtitle">多设备同步 · 免费无广告</div>
+      <div class="subtitle">多设备同步 · 简洁高效</div>
       <div class="error-msg" id="authError"></div>
       <input type="email" id="authEmail" placeholder="邮箱" autocomplete="email" />
       <input type="password" id="authPwd" placeholder="密码（至少4位）" autocomplete="current-password" />
       <button class="btn btn-primary" id="authLogin">登 录</button>
       <button class="btn btn-secondary" id="authRegister">注 册</button>
+      <div class="switch-link" id="authForgot" style="margin-bottom:10px;">忘记密码？</div>
       <div class="divider">或者</div>
       <button class="btn btn-outline" id="authSyncCode">🔗 使用同步码</button>
       <button class="btn btn-outline" id="authLocal">🏠 跳过，本地使用</button>
@@ -888,12 +900,36 @@ const App = {
       const pw = document.getElementById('authPwd').value;
       if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
       if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
-      try { await Auth.registerEmail(em, pw); this.afterLogin(); }
-      catch(e) { err().textContent = '注册失败：'+e.message.slice(0,60); }
+      try { await Auth.registerEmail(em, pw); err().textContent = ''; this.afterLogin(); }
+      catch(e) { err().textContent = e.message.includes('确认邮件') ? '已发送确认邮件，请查收后登录' : '注册失败：'+e.message.slice(0,60); }
     });
 
+    document.getElementById('authForgot').addEventListener('click', () => this.renderForgotPwd());
     document.getElementById('authSyncCode').addEventListener('click', () => this.renderSyncCode());
     document.getElementById('authLocal').addEventListener('click', () => this.afterLocal());
+  },
+
+  renderForgotPwd() {
+    const d = document.getElementById('authDialog');
+    d.innerHTML = `
+      <h2>🔑 找回密码</h2>
+      <div class="subtitle">输入注册邮箱，我们会发送重置链接</div>
+      <div class="error-msg" id="authError"></div>
+      <div id="forgotOk" style="color:var(--chestnut-leaf);font-size:13px;margin-bottom:10px;display:none;">✅ 重置链接已发送，请查收邮件</div>
+      <input type="email" id="forgotEmail" placeholder="注册邮箱" autocomplete="email" />
+      <button class="btn btn-primary" id="doForgot">发送重置链接</button>
+      <div class="switch-link" id="forgotBack">← 返回登录</div>
+    `;
+    document.getElementById('forgotBack').addEventListener('click', () => this.renderAuthMain());
+    document.getElementById('doForgot').addEventListener('click', async () => {
+      const em = document.getElementById('forgotEmail').value.trim();
+      if (!em) { document.getElementById('authError').textContent = '请输入邮箱'; return; }
+      try {
+        await Auth.forgotPassword(em);
+        document.getElementById('authError').textContent = '';
+        document.getElementById('forgotOk').style.display = 'block';
+      } catch(e) { document.getElementById('authError').textContent = '发送失败：'+e.message.slice(0,60); }
+    });
   },
 
   renderSyncCode() {
