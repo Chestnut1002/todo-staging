@@ -563,12 +563,21 @@ const App = {
       document.querySelectorAll('.period-option').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     }));
 
-    document.getElementById('notifBtn').addEventListener('click',()=>{
-      Notif.request().then(ok => {
-        document.getElementById('notifStatus').style.display = ok ? '' : 'none';
-        document.getElementById('notifStatus').textContent = ok ? '🔔 通知已开启' : '';
-        if (ok) Notif.start();
-      });
+    document.getElementById('notifBtn').addEventListener('click',async ()=>{
+      if (!('Notification' in window)) {
+        document.getElementById('notifStatus').style.display = '';
+        document.getElementById('notifStatus').textContent = '⚠️ 浏览器不支持通知';
+        return;
+      }
+      if (Notification.permission === 'denied') {
+        document.getElementById('notifStatus').style.display = '';
+        document.getElementById('notifStatus').textContent = '⚠️ 通知已被禁用，请在浏览器设置中开启';
+        return;
+      }
+      const ok = await Notif.request();
+      document.getElementById('notifStatus').style.display = ok ? '' : 'none';
+      document.getElementById('notifStatus').textContent = ok ? '🔔 通知已开启' : '';
+      if (ok) Notif.start();
     });
 
     document.getElementById('mobileCalToggle').addEventListener('click',()=>{
