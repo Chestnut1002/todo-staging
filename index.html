@@ -243,24 +243,6 @@ a { color: var(--color-today); text-decoration: none; }
 /* ===== 状态栏统计 ===== */
 .stats-divider { color: var(--border-color); margin: 0 4px; }
 
-/* ===== 👍 动画 ===== */
-.thumb-burst {
-  position: fixed; z-index: 999; pointer-events: none;
-  top: 50%; left: 50%; font-size: 64px;
-  transform: translate(-50%,-50%) scale(0); opacity: 0;
-  will-change: transform, opacity;
-}
-.thumb-burst.go {
-  animation: thumbPop 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-@keyframes thumbPop {
-  0%   { transform: translate(-50%,-50%) scale(0) rotate(-10deg); opacity: 0; }
-  25%  { transform: translate(-50%,-50%) scale(1.3) rotate(5deg); opacity: 1; }
-  45%  { transform: translate(-50%,-50%) scale(1) rotate(0deg); opacity: 1; }
-  75%  { transform: translate(-50%,-65%) scale(0.9); opacity: 0.5; }
-  100% { transform: translate(-50%,-85%) scale(0.7); opacity: 0; }
-}
-
 /* ===== 响应式 ===== */
 @media (max-width: 700px) {
   body { font-size: 14px; }
@@ -301,7 +283,6 @@ a { color: var(--color-today); text-decoration: none; }
   .period-divider { font-size: 10px; margin: 10px 0 6px; }
   .progress-bar { height: 3px; max-width: 100px; }
   .progress-num { font-size: 10px; }
-  .thumb-burst.go { animation-duration: 0.8s; }
 }
 </style>
 </head>
@@ -431,14 +412,26 @@ const Storage = {
     const today = U.fmtDate(new Date());
     const wv = U.getWeekVal(today);
     const {start, end} = U.getWeekRange(wv);
+    const monthPrefix = today.substring(0, 7);
 
-    const dayTotal = tasks.filter(t => t.date === today || (t.periodType==='day'&&t.date===today)).length;
-    const dayDone = tasks.filter(t => t.completed && t.date === today).length;
+    // 今日：periodType='day' 且 deadline 在今天
+    const dayAll = tasks.filter(t => t.periodType==='day' && t.deadline);
+    const dayTotal = dayAll.filter(t => t.deadline.startsWith(today)).length;
+    const dayDone = dayAll.filter(t => t.deadline.startsWith(today) && t.completed).length;
 
-    const weekTotal = tasks.filter(t => (t.date >= start && t.date <= end) || (t.periodType==='week'&&t.periodValue===wv)).length;
-    const weekDone = tasks.filter(t => t.completed && ((t.date >= start && t.date <= end) || (t.periodType==='week'&&t.periodValue===wv))).length;
+    // 本周：deadline 在本周范围内 + 本周周期任务
+    const weekDay = dayAll.filter(t => t.deadline >= start && t.deadline <= end);
+    const weekPeriod = tasks.filter(t => t.periodType==='week' && t.periodValue===wv);
+    const weekTotal = weekDay.length + weekPeriod.length;
+    const weekDone = weekDay.filter(t=>t.completed).length + weekPeriod.filter(t=>t.completed).length;
 
-    return { dayTotal, dayDone, weekTotal, weekDone };
+    // 本月：deadline 在本月 + 本月周期任务
+    const monthDay = dayAll.filter(t => t.deadline.startsWith(monthPrefix));
+    const monthPeriod = tasks.filter(t => t.periodType==='month' && t.periodValue===monthPrefix);
+    const monthTotal = monthDay.length + monthPeriod.length;
+    const monthDone = monthDay.filter(t=>t.completed).length + monthPeriod.filter(t=>t.completed).length;
+
+    return { dayTotal, dayDone, weekTotal, weekDone, monthTotal, monthDone };
   }
 };
 
@@ -526,17 +519,7 @@ const TaskList = {
     document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(){
       const id=Number(this.dataset.id), item=this.closest('.task-item'); if(!item)return;
       item.classList.add('removing');
-      item.addEventListener('animationend',()=>{
-        const sBefore = Storage.getStats();
-        Storage.delete(id);
-        TaskList.load(); Calendar.refresh();
-        const sAfter = Storage.getStats();
-        // 检测是否刚刚完成了全部任务
-        if ((sBefore.dayDone < sBefore.dayTotal && sAfter.dayDone >= sAfter.dayTotal && sAfter.dayTotal > 0) ||
-            (sBefore.weekDone < sBefore.weekTotal && sAfter.weekDone >= sAfter.weekTotal && sAfter.weekTotal > 0)) {
-          App.triggerThumb();
-        }
-      },{once:true});
+      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); },{once:true});
     }));
   },
   updateStatus(tasks) {
@@ -723,43 +706,34 @@ const App = {
 
   refreshStats() {
     const s = Storage.getStats();
-    // 进度条（仅日视图显示今日进度）
     const pw = document.getElementById('progressWrap');
     const pf = document.getElementById('progressFill');
     const pn = document.getElementById('progressNum');
     if (this.view === 'day' && s.dayTotal > 0) {
       pw.style.display = 'flex';
-      const pct = Math.round(s.dayDone / s.dayTotal * 100);
-      pf.style.width = pct + '%';
-      pf.className = 'progress-fill' + (pct >= 100 ? ' full' : '');
+      pf.style.width = Math.round(s.dayDone / s.dayTotal * 100) + '%';
+      pf.className = 'progress-fill' + (s.dayDone >= s.dayTotal ? ' full' : '');
       pn.textContent = s.dayDone + '/' + s.dayTotal;
     } else if (this.view === 'week' && s.weekTotal > 0) {
       pw.style.display = 'flex';
-      const pct = Math.round(s.weekDone / s.weekTotal * 100);
-      pf.style.width = pct + '%';
-      pf.className = 'progress-fill' + (pct >= 100 ? ' full' : '');
+      pf.style.width = Math.round(s.weekDone / s.weekTotal * 100) + '%';
+      pf.className = 'progress-fill' + (s.weekDone >= s.weekTotal ? ' full' : '');
       pn.textContent = s.weekDone + '/' + s.weekTotal;
+    } else if (this.view === 'month' && s.monthTotal > 0) {
+      pw.style.display = 'flex';
+      pf.style.width = Math.round(s.monthDone / s.monthTotal * 100) + '%';
+      pf.className = 'progress-fill' + (s.monthDone >= s.monthTotal ? ' full' : '');
+      pn.textContent = s.monthDone + '/' + s.monthTotal;
     } else {
       pw.style.display = 'none';
     }
-    // 状态栏统计
     document.getElementById('statsDay').textContent = '📅 今日 '+s.dayDone+'/'+s.dayTotal;
     document.getElementById('statsWeek').textContent = '📋 本周 '+s.weekDone+'/'+s.weekTotal;
-  },
-
-  triggerThumb() {
-    const el = document.getElementById('thumbBurst');
-    if (!el) return;
-    el.classList.remove('go');
-    void el.offsetWidth; // reflow trick to restart animation
-    el.classList.add('go');
-    el.addEventListener('animationend', () => el.classList.remove('go'), { once: true });
   }
 };
 
 // ===== 启动 =====
 document.addEventListener('DOMContentLoaded', () => App.init());
 </script>
-<div class="thumb-burst" id="thumbBurst">👍</div>
 </body>
 </html>
