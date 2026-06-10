@@ -331,11 +331,11 @@ a { color: var(--color-today); text-decoration: none; }
 
 <script>
 // ==================== 全局配置 ====================
-function getToken() { return localStorage.getItem(SYNC_KEY+'_token'); }
-function setToken(t) { localStorage.setItem(SYNC_KEY+'_token', t); }
-const GIST_DESC = 'toDoliSt-sync-data';
+const SUPABASE_URL = 'https://jnqelmphbbffjnnyanjv.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpucWVsbXBoYmJmZmpubnlhbmp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjM2MzYsImV4cCI6MjA5NjU5OTYzNn0.UfW7rSWHUFMMXkkc8nOqvFsi1FuTaMvQs8qCwCs9nCE';
 const SYNC_KEY = 'todolist_sync';
 const LOCAL_KEY = 'todolist_local';
+let supabase = null;
 
 // ==================== 工具函数 ====================
 const U = {
@@ -350,64 +350,79 @@ const U = {
   WD: ['一','二','三','四','五','六','日']
 };
 
-// ==================== 云端同步（GitHub Gist） ====================
+// ==================== 云端同步（Supabase） ====================
 const Cloud = {
-  async getGistId() { return localStorage.getItem(SYNC_KEY+'_gist'); },
-  async setGistId(id) { localStorage.setItem(SYNC_KEY+'_gist', id); },
-
-  async _api(method, path, body) {
-    const res = await fetch(`https://api.github.com${path}`, {
-      method, headers: { 'Authorization': `token ${getToken()}`, 'Accept': 'application/vnd.github+json', 'Content-Type': body?'application/json':undefined }, body: body?JSON.stringify(body):undefined
-    });
-    if (!res.ok) { const t = await res.text(); throw new Error(t); }
-    return res.json();
+  init() {
+    // 动态加载 Supabase JS（避免 CORS/模块加载问题）
+    if (window.supabaseClient) return window.supabaseClient;
+    // 使用简单的 REST fetch 而非 supabase-js CDN 以减少依赖
+    return null;
   },
 
-  async upload(tasks) {
-    let gistId = await this.getGistId();
-    const content = JSON.stringify(tasks, null, 0);
-    const file = { 'todolist.json': { content } };
-    try {
-      if (gistId) {
-        await this._api('PATCH', `/gists/${gistId}`, { description: GIST_DESC, files: file });
-      } else {
-        const r = await this._api('POST', '/gists', { description: GIST_DESC, public: false, files: file });
-        gistId = r.id;
-        await this.setGistId(gistId);
-      }
-      return true;
-    } catch(e) { console.error('Cloud upload error:', e); return false; }
-  },
-
-  async download() {
-    const gistId = await this.getGistId();
-    if (!gistId) return null;
-    try {
-      const r = await this._api('GET', `/gists/${gistId}`);
-      const f = r.files['todolist.json'];
-      if (!f || !f.content) return null;
-      return JSON.parse(f.content);
-    } catch(e) { console.error('Cloud download error:', e); return null; }
+  _headers() {
+    const h = { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+    const sess = Auth.getSession();
+    if (sess) h['Authorization'] = `Bearer ${sess.access_token}`;
+    return h;
   },
 
   async syncDown() {
-    const cloud = await this.download();
-    if (!cloud) return;
-    const local = Storage.getAll();
-    // 合并：云端优先（更新的覆盖旧的）
+    if (!Auth.loggedIn()) return;
+    const sess = Auth.getSession();
+    let query = `${SUPABASE_URL}/rest/v1/tasks?select=*&order=created_at`;
+    if (sess.user) {
+      // 邮箱用户：使用 RLS 自动过滤
+    }
+    const res = await fetch(query, { headers: this._headers() });
+    if (!res.ok) return;
+    const cloud = await res.json();
+    if (!cloud.length) return;
+    // 合并：云端覆盖本地
     const map = new Map();
-    local.forEach(t => map.set(t.id, t));
+    Storage.getAll().forEach(t => map.set(t.local_id||t.id, t));
     cloud.forEach(t => {
-      const exist = map.get(t.id);
-      if (!exist || new Date(t.updatedAt||t.createdAt) > new Date(exist.updatedAt||exist.createdAt)) {
-        map.set(t.id, t);
+      const lid = t.local_id || String(t.id);
+      const exist = map.get(lid);
+      if (!exist || new Date(t.updated_at) > new Date(exist.updatedAt||exist.createdAt)) {
+        map.set(lid, { id: t.local_id||t.id, title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, createdAt: t.created_at, updatedAt: t.updated_at });
       }
     });
     Storage.saveAll([...map.values()]);
   },
 
   async syncUp() {
-    await this.upload(Storage.getAll());
+    if (!Auth.loggedIn()) return;
+    const sess = Auth.getSession();
+    if (!sess) return;
+    // 先删再插（简化同步策略）
+    const userId = sess.user?.id;
+    const syncCode = localStorage.getItem(SYNC_KEY+'_code');
+    const tasks = Storage.getAll();
+    // 批量上传：逐个插入
+    for (const t of tasks) {
+      const body = {
+        user_id: userId || null,
+        sync_code: syncCode || null,
+        title: t.title,
+        date: t.date,
+        period_type: t.periodType,
+        period_value: t.periodValue,
+        deadline: t.deadline,
+        completed: t.completed || 0,
+        notified: t.notified || false,
+        local_id: String(t.id)
+      };
+      // 先尝试找已有记录
+      const check = await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${t.id}&select=id`, { headers: this._headers() });
+      if (check.ok) {
+        const rows = await check.json();
+        if (rows.length) {
+          await fetch(`${SUPABASE_URL}/rest/v1/tasks?id=eq.${rows[0].id}`, { method: 'PATCH', headers: this._headers(), body: JSON.stringify(body) });
+          continue;
+        }
+      }
+      await fetch(`${SUPABASE_URL}/rest/v1/tasks`, { method: 'POST', headers: this._headers(), body: JSON.stringify(body) });
+    }
   },
 
   async fullSync() {
@@ -418,43 +433,18 @@ const Cloud = {
       document.getElementById('syncStatus').textContent = '☁️ 已同步';
       document.getElementById('syncStatus').style.display = '';
       return true;
-    } catch(e) {
-      document.getElementById('syncStatus').classList.add('offline');
-      document.getElementById('syncStatus').textContent = '离线';
-      document.getElementById('syncStatus').style.display = '';
-      return false;
-    }
+    } catch(e) { return false; }
   },
 
-  async joinSync(code) {
-    // 通过同步码查找或创建 Gist
-    const key = SYNC_KEY + '_code_' + code;
-    let gistId = localStorage.getItem(key);
-    if (!gistId) {
-      // 创建新的 Gist
-      const r = await this._api('POST', '/gists', { description: GIST_DESC + ':' + code, public: false, files: { 'todolist.json': { content: '[]' } } });
-      gistId = r.id;
-      localStorage.setItem(key, gistId);
-    }
-    await this.setGistId(gistId);
-    await this.syncDown();
-    return true;
+  async deleteRemote(localId) {
+    if (!Auth.loggedIn()) return;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${localId}`, { method: 'DELETE', headers: this._headers() });
   },
 
   generateCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
-    return code;
-  },
-
-  async initCode() {
-    const existing = localStorage.getItem(SYNC_KEY+'_code');
-    if (existing) return existing;
-    const code = this.generateCode();
-    localStorage.setItem(SYNC_KEY+'_code', code);
-    // 创建初始 Gist
-    await this.upload([]);
     return code;
   }
 };
@@ -631,14 +621,22 @@ const Search = {
   clear() { this.active=false; App.setSearchUI(false); TaskList.load(); App.updateHeader(); }
 };
 
-// ==================== 认证 ====================
+// ==================== 认证（Supabase Auth） ====================
 const Auth = {
-  mode: 'none', // 'none' | 'sync' | 'email'
+  mode: 'none',
   email: '',
+  _session: null,
+
+  loggedIn() { return this.mode === 'email' || this.mode === 'sync'; },
+  getSession() { return this._session; },
 
   init() {
     const mode = localStorage.getItem(SYNC_KEY+'_mode');
     const email = localStorage.getItem(SYNC_KEY+'_email');
+    const sessionStr = localStorage.getItem(SYNC_KEY+'_session');
+    if (sessionStr) {
+      try { this._session = JSON.parse(sessionStr); } catch(e) {}
+    }
     if (mode === 'sync' || mode === 'email') {
       this.mode = mode;
       this.email = email || '';
@@ -647,49 +645,60 @@ const Auth = {
     return false;
   },
 
+  async _api(method, path, body) {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
+      method, headers: { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    return res.json();
+  },
+
   async loginEmail(email, password) {
-    // 简单实现：邮箱+密码哈希用于加密 Gist
-    const hash = await this._hash(email + ':' + password);
-    const key = SYNC_KEY + '_email_' + btoa(email);
-    let gistId = localStorage.getItem(key);
-    if (!gistId) {
-      // 首次登录，创建 Gist
-      const r = await Cloud._api('POST', '/gists', { description: GIST_DESC, public: false, files: { 'todolist.json': { content: JSON.stringify(Storage.getAll()) } } });
-      gistId = r.id;
-      localStorage.setItem(key, gistId);
+    try {
+      const r = await this._api('POST', '/token?grant_type=password', { email, password });
+      this._session = r;
+      this.mode = 'email';
+      this.email = email;
+      localStorage.setItem(SYNC_KEY+'_mode', 'email');
+      localStorage.setItem(SYNC_KEY+'_email', email);
+      localStorage.setItem(SYNC_KEY+'_session', JSON.stringify(r));
+      return true;
+    } catch(e) {
+      throw e;
     }
-    await Cloud.setGistId(gistId);
-    this.mode = 'email';
-    this.email = email;
-    localStorage.setItem(SYNC_KEY+'_mode', 'email');
-    localStorage.setItem(SYNC_KEY+'_email', email);
-    await Cloud.syncDown();
+  },
+
+  async registerEmail(email, password) {
+    const r = await this._api('POST', '/signup', { email, password });
+    // Supabase may return user even without email confirmation
+    if (r.user) {
+      // Auto-login after signup
+      return this.loginEmail(email, password);
+    }
     return true;
   },
 
-  async _hash(str) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2,'0')).join('');
-  },
-
-  logout() {
+  async logout() {
+    if (this._session) {
+      try {
+        await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+          method: 'POST', headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${this._session.access_token}` }
+        });
+      } catch(e) {}
+    }
     this.mode = 'none';
     this.email = '';
+    this._session = null;
     localStorage.removeItem(SYNC_KEY+'_mode');
     localStorage.removeItem(SYNC_KEY+'_email');
-    localStorage.removeItem(SYNC_KEY+'_gist');
+    localStorage.removeItem(SYNC_KEY+'_session');
     localStorage.removeItem(SYNC_KEY+'_code');
   },
 
   async changePassword(newPassword) {
-    // 重新登录（因为密码参与哈希）
-    if (this.mode === 'email') {
-      await this.loginEmail(this.email, newPassword);
-      return true;
-    }
-    return false;
+    if (!this._session) return false;
+    const r = await this._api('PUT', '/user', { password: newPassword });
+    return true;
   }
 };
 
@@ -854,13 +863,12 @@ const App = {
     const d = document.getElementById('authDialog');
     d.innerHTML = `
       <h2>🌰 toDoliSt</h2>
-      <div class="subtitle">多设备同步 · 待办小助手</div>
+      <div class="subtitle">多设备同步 · 免费无广告</div>
       <div class="error-msg" id="authError"></div>
-      <input type="text" id="authToken" placeholder="GitHub Token（首次使用必填）" style="font-family:monospace;font-size:11px;" />
-      <div class="switch-link" style="margin-bottom:8px;"><a href="https://github.com/settings/tokens/new" target="_blank">→ 点此获取 Token（勾选repo）</a></div>
-      <input type="email" id="authEmail" placeholder="邮箱（可选，方便找回）" autocomplete="email" />
+      <input type="email" id="authEmail" placeholder="邮箱" autocomplete="email" />
       <input type="password" id="authPwd" placeholder="密码（至少4位）" autocomplete="current-password" />
-      <button class="btn btn-primary" id="authLogin">登 录 / 注 册</button>
+      <button class="btn btn-primary" id="authLogin">登 录</button>
+      <button class="btn btn-secondary" id="authRegister">注 册</button>
       <div class="divider">或者</div>
       <button class="btn btn-outline" id="authSyncCode">🔗 使用同步码</button>
       <button class="btn btn-outline" id="authLocal">🏠 跳过，本地使用</button>
@@ -868,15 +876,12 @@ const App = {
     const err = () => document.getElementById('authError');
 
     document.getElementById('authLogin').addEventListener('click', async () => {
-      const token = document.getElementById('authToken').value.trim();
       const em = document.getElementById('authEmail').value.trim();
       const pw = document.getElementById('authPwd').value;
-      if (!token) { err().textContent = '请先填写 GitHub Token'; return; }
       if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
       if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
-      setToken(token);
       try { await Auth.loginEmail(em, pw); this.afterLogin(); }
-      catch(e) { err().textContent = '失败：'+e.message.slice(0,60); }
+      catch(e) { err().textContent = '登录失败，检查邮箱密码'; }
     });
 
     document.getElementById('authRegister').addEventListener('click', async () => {
@@ -884,10 +889,8 @@ const App = {
       const pw = document.getElementById('authPwd').value;
       if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
       if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
-      try {
-        await Auth.loginEmail(em, pw);
-        this.afterLogin();
-      } catch(e) { err().textContent = '注册失败，请重试'; }
+      try { await Auth.registerEmail(em, pw); this.afterLogin(); }
+      catch(e) { err().textContent = '注册失败：'+e.message.slice(0,60); }
     });
 
     document.getElementById('authSyncCode').addEventListener('click', () => this.renderSyncCode());
@@ -896,11 +899,12 @@ const App = {
 
   renderSyncCode() {
     const d = document.getElementById('authDialog');
+    const existing = localStorage.getItem(SYNC_KEY+'_code') || '';
     d.innerHTML = `
       <h2>🌰 同步码</h2>
-      <div class="subtitle">输入同步码加入，或生成新码</div>
+      <div class="subtitle">在另一设备输入相同同步码即可同步</div>
       <div class="error-msg" id="authError"></div>
-      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
+      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" value="${existing}" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
       <button class="btn btn-primary" id="syncJoin">加入同步</button>
       <button class="btn btn-secondary" id="syncCreate">生成新同步码</button>
       <div class="switch-link" id="syncBack">← 返回</div>
@@ -909,23 +913,19 @@ const App = {
     document.getElementById('syncJoin').addEventListener('click', async () => {
       const code = document.getElementById('syncCodeInput').value.trim().toUpperCase();
       if (code.length < 4) { document.getElementById('authError').textContent = '同步码至少4位'; return; }
-      try {
-        await Cloud.joinSync(code);
-        Auth.mode = 'sync';
-        localStorage.setItem(SYNC_KEY+'_mode','sync');
+      localStorage.setItem(SYNC_KEY+'_code', code);
+      Auth.mode = 'sync';
+      localStorage.setItem(SYNC_KEY+'_mode','sync');
         this.afterLogin();
       } catch(e) { document.getElementById('authError').textContent = '加入失败，检查同步码'; }
     });
-    document.getElementById('syncCreate').addEventListener('click', async () => {
+    document.getElementById('syncCreate').addEventListener('click', () => {
       const code = Cloud.generateCode();
       document.getElementById('syncCodeInput').value = code;
-      try {
-        await Cloud.upload([]);
-        Auth.mode = 'sync';
-        localStorage.setItem(SYNC_KEY+'_mode','sync');
-        localStorage.setItem(SYNC_KEY+'_code', code);
-        this.afterLogin();
-      } catch(e) { document.getElementById('authError').textContent = '创建失败，请重试'; }
+      Auth.mode = 'sync';
+      localStorage.setItem(SYNC_KEY+'_mode','sync');
+      localStorage.setItem(SYNC_KEY+'_code', code);
+      this.afterLogin();
     });
   },
 
@@ -956,22 +956,23 @@ const App = {
     const overlay = document.getElementById('authOverlay');
     overlay.style.display = 'flex';
     const d = document.getElementById('authDialog');
-    const gistId = localStorage.getItem(SYNC_KEY+'_gist') || 'N/A';
     const code = localStorage.getItem(SYNC_KEY+'_code') || '';
     d.innerHTML = `
       <h2>👤 账户信息</h2>
       <div style="text-align:left;font-size:12px;color:var(--text-secondary);margin:12px 0;">
         <p>📧 ${Auth.email || '同步码用户'}</p>
         <p>🔗 同步码: <strong style="font-size:16px;">${code || '(无)'}</strong></p>
-        <p style="word-break:break-all;">💾 Gist: ${gistId}</p>
+        <p>☁️ 存储: Supabase</p>
       </div>
-      <button class="btn btn-primary" id="copyCode">📋 复制同步码</button>
+      ${code ? '<button class="btn btn-primary" id="copyCode">📋 复制同步码</button>' : ''}
       <button class="btn btn-outline" id="closeAccount">关闭</button>
     `;
     document.getElementById('closeAccount').addEventListener('click',()=>{overlay.style.display='none';});
-    document.getElementById('copyCode').addEventListener('click',()=>{
-      if(code) { navigator.clipboard.writeText(code).then(()=>alert('同步码已复制！')); }
-    });
+    if (code) {
+      document.getElementById('copyCode').addEventListener('click',()=>{
+        navigator.clipboard.writeText(code).then(()=>alert('同步码已复制！'));
+      });
+    }
   },
 
   async afterLogin() {
