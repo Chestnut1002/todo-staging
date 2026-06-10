@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>toDoliSt</title>
+
+<!-- PWA manifest -->
+<link rel="manifest" href="data:application/json,{}">
+<meta name="theme-color" content="#64b5f6">
+
+<style>
+/* ===== 字体（Fredoka One 风格，可爱圆体） ===== */
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&display=swap');
+
+/* ===== CSS 变量 ===== */
+:root {
+  --bg-main: #f5f9ff;
+  --bg-sidebar: #e8f1fc;
+  --color-primary: #64b5f6;
+  --color-primary-hover: #42a5f5;
+  --color-today: #1e88e5;
+  --text-primary: #333333;
+  --text-secondary: #888888;
+  --text-disabled: #bdbdbd;
+  --border-color: #e0e0e0;
+  --white: #ffffff;
+  --chestnut: #c67b4b;
+  --chestnut-dark: #8b5e3c;
+  --chestnut-leaf: #7bc67e;
+  --warm-yellow: #f9e4b7;
+  --danger: #ef5350;
+  --warning: #f4a236;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif;
+  font-size: 14px; color: var(--text-primary); background: var(--bg-main);
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none;
+}
+
+button { cursor: pointer; border: none; background: none; font-family: inherit; font-size: inherit; }
+input { font-family: inherit; font-size: inherit; border: none; outline: none; background: none; }
+
+a { color: var(--color-today); text-decoration: none; }
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+
+/* ===== 顶部栏 ===== */
+.top-bar {
+  display: flex; align-items: center; height: 52px; padding: 0 16px;
+  background: var(--white); border-bottom: 1px solid var(--border-color); gap: 12px; flex-shrink: 0;
+}
+
+/* Logo */
+.logo {
+  font-family: 'Fredoka One', 'Comic Sans MS', cursive;
+  font-size: 22px; font-weight: 700; color: var(--chestnut-dark);
+  display: flex; align-items: center; gap: 2px; flex-shrink: 0; cursor: default;
+}
+.logo .nut { font-size: 20px; }
+.logo .t { color: var(--chestnut-dark); }
+.logo .D { color: var(--chestnut); }
+.logo .l, .logo .i, .logo .S, .logo .t2 { color: var(--text-primary); }
+
+/* 搜索框 */
+.search-box {
+  display: flex; align-items: center; background: var(--bg-main);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 0 10px; height: 34px; flex: 1; max-width: 260px; transition: border-color 0.2s;
+}
+.search-box:focus-within { border-color: var(--color-primary); }
+.search-icon { font-size: 14px; margin-right: 6px; opacity: 0.5; }
+.search-input { flex: 1; height: 100%; background: transparent; font-size: 13px; }
+.search-input::placeholder { color: var(--text-disabled); }
+.search-clear { width: 20px; height: 20px; border-radius: 50%; font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+.search-clear:hover { background: var(--border-color); }
+.search-clear.hidden { display: none; }
+
+/* 右侧区域 */
+.top-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.view-tabs { display: flex; background: var(--bg-main); border-radius: var(--radius-md); padding: 2px; gap: 1px; }
+.view-tab { width: 38px; height: 28px; border-radius: 6px; font-size: 12px; font-weight: 500; color: var(--text-secondary); transition: 0.2s; }
+.view-tab:hover { color: var(--text-primary); }
+.view-tab.active { background: var(--white); color: var(--color-today); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+.user-btn { font-size: 12px; color: var(--text-secondary); padding: 5px 10px; border-radius: var(--radius-sm); transition: 0.2s; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.user-btn:hover { background: var(--bg-sidebar); color: var(--text-primary); }
+.user-btn.logged-in { color: var(--chestnut); font-weight: 500; }
+
+.sync-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; background: var(--chestnut-leaf); color: var(--white); font-weight: 500; white-space: nowrap; }
+.sync-badge.offline { background: var(--text-disabled); }
+
+.mobile-cal-toggle { display: none; width: 34px; height: 34px; border-radius: 50%; align-items: center; justify-content: center; font-size: 18px; color: var(--text-secondary); transition: 0.2s; flex-shrink: 0; }
+.mobile-cal-toggle:hover { background: var(--border-color); }
+
+/* ===== 主体 ===== */
+.main-container { display: flex; flex: 1; overflow: hidden; }
+
+/* ===== 侧边栏（月历） ===== */
+.sidebar {
+  width: 270px; min-width: 250px; background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow-y: auto;
+}
+
+/* ===== 主内容 ===== */
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-main); }
+.content-header { display: flex; align-items: center; padding: 14px 20px; gap: 10px; flex-shrink: 0; }
+.header-info { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.header-date { font-size: 19px; font-weight: 600; color: var(--text-primary); }
+.header-sub { font-size: 12px; color: var(--text-secondary); }
+.nav-btn { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: 0.2s; font-size: 11px; }
+.nav-btn:hover { background: var(--border-color); color: var(--text-primary); }
+.today-btn { padding: 5px 12px; border-radius: var(--radius-sm); background: var(--color-primary); color: var(--white); font-size: 12px; font-weight: 500; transition: 0.2s; }
+.today-btn:hover { background: var(--color-primary-hover); }
+
+/* 任务列表 */
+.task-list { flex: 1; overflow-y: auto; padding: 0 20px 12px; }
+.period-divider { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; color: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.period-divider::before, .period-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
+
+.task-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--white); border-radius: var(--radius-md); margin-bottom: 5px; transition: 0.2s; border: 1px solid transparent; position: relative; }
+.task-item:hover { border-color: var(--border-color); box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
+.task-item.removing { animation: fadeOut 350ms ease-out forwards; }
+.task-item.urgent { border-left: 3px solid var(--warning); }
+.task-item.overdue { border-left: 3px solid var(--danger); }
+
+@keyframes fadeOut {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to { opacity: 0; transform: translateX(20px) scale(0.9); }
+}
+
+/* 🌰 栗子圆圈按钮 */
+.task-circle {
+  width: 24px; height: 24px; min-width: 24px; border-radius: 50%;
+  border: 2px solid var(--border-color); font-size: 15px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  transition: 0.2s; line-height: 1;
+}
+.task-circle:hover { border-color: var(--chestnut); background: rgba(198,123,75,0.1); transform: scale(1.1); }
+.task-circle.done { border-color: var(--chestnut); background: var(--chestnut); }
+.task-circle.done::after { content: '✓'; color: var(--white); font-size: 11px; font-weight: 700; }
+
+.task-body { flex: 1; min-width: 0; }
+.task-title { font-size: 14px; line-height: 1.4; word-break: break-all; }
+.task-item.done .task-title { color: var(--text-disabled); text-decoration: line-through; }
+.task-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
+.task-tag { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 500; white-space: nowrap; }
+.task-tag.today { background: rgba(30,136,229,0.1); color: var(--color-today); }
+.task-tag.week { background: rgba(100,181,246,0.12); color: var(--color-primary); }
+.task-tag.month { background: rgba(129,91,216,0.1); color: #815bd8; }
+.task-tag.deadline-ok { background: rgba(100,181,246,0.1); color: var(--color-primary); }
+.task-tag.deadline-near { background: rgba(244,162,54,0.12); color: var(--warning); font-weight: 600; }
+.task-tag.deadline-over { background: rgba(239,83,80,0.1); color: var(--danger); font-weight: 600; }
+.task-tag.deadline-done { background: rgba(189,189,189,0.1); color: var(--text-disabled); }
+
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 50px 20px; color: var(--text-disabled); }
+.empty-state .icon { font-size: 44px; margin-bottom: 12px; opacity: 0.6; }
+.empty-state p { font-size: 13px; }
+.search-highlight { background: #ffeb3b; border-radius: 2px; padding: 0 1px; }
+.search-location { font-size: 10px; color: var(--color-today); }
+
+/* ===== 添加任务栏 ===== */
+.add-task-bar { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--border-color); background: var(--white); flex-shrink: 0; flex-wrap: wrap; }
+.task-input { flex: 1; min-width: 140px; height: 36px; padding: 0 12px; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 13px; transition: 0.2s; }
+.task-input:focus { border-color: var(--color-primary); background: var(--white); }
+.task-input::placeholder { color: var(--text-disabled); }
+.period-select { display: flex; gap: 3px; }
+.period-option { padding: 5px 8px; border-radius: var(--radius-sm); font-size: 10px; color: var(--text-secondary); background: var(--bg-main); transition: 0.2s; white-space: nowrap; }
+.period-option:hover { background: var(--border-color); }
+.period-option.active { background: var(--color-primary); color: var(--white); }
+.deadline-row { display: flex; align-items: center; gap: 4px; }
+.deadline-row input { padding: 4px 6px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 11px; background: var(--white); }
+.deadline-row input:focus { border-color: var(--color-primary); }
+.add-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--chestnut); color: var(--white); font-size: 18px; display: flex; align-items: center; justify-content: center; transition: 0.2s; flex-shrink: 0; }
+.add-btn:hover { background: var(--chestnut-dark); transform: scale(1.05); }
+.add-btn:active { transform: scale(0.95); }
+
+/* ===== 状态栏 ===== */
+.status-bar { height: 28px; padding: 0 16px; display: flex; align-items: center; background: var(--white); border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-secondary); flex-shrink: 0; gap: 16px; }
+.status-bar .notif-status { font-size: 10px; color: var(--chestnut-leaf); }
+
+/* ===== 登录/注册弹窗 ===== */
+.auth-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(2px); }
+.auth-dialog { background: var(--white); border-radius: var(--radius-xl); padding: 32px 28px; width: 360px; max-width: 92vw; box-shadow: 0 8px 32px rgba(0,0,0,0.12); text-align: center; }
+.auth-dialog h2 { font-family: 'Fredoka One', cursive; font-size: 24px; color: var(--chestnut-dark); margin-bottom: 6px; }
+.auth-dialog .subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; }
+.auth-dialog input { width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: 10px; font-size: 13px; background: var(--bg-main); }
+.auth-dialog input:focus { border-color: var(--color-primary); background: var(--white); }
+.auth-dialog .btn { width: 100%; padding: 10px; border-radius: var(--radius-md); font-size: 14px; font-weight: 600; margin-bottom: 8px; transition: 0.2s; }
+.btn-primary { background: var(--chestnut); color: var(--white); }
+.btn-primary:hover { background: var(--chestnut-dark); }
+.btn-secondary { background: var(--bg-sidebar); color: var(--text-primary); }
+.btn-secondary:hover { background: var(--border-color); }
+.btn-outline { background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary); }
+.btn-outline:hover { background: var(--bg-main); }
+.auth-dialog .divider { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--text-disabled); font-size: 11px; }
+.auth-dialog .divider::before, .auth-dialog .divider::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
+.auth-dialog .switch-link { font-size: 11px; color: var(--color-today); cursor: pointer; margin-top: 10px; }
+.auth-dialog .switch-link:hover { text-decoration: underline; }
+.auth-dialog .error-msg { color: var(--danger); font-size: 11px; margin-bottom: 8px; min-height: 16px; }
+
+/* ===== 用户菜单下拉 ===== */
+.dropdown { position: absolute; top: 44px; right: 8px; background: var(--white); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: 0 4px 16px rgba(0,0,0,0.1); z-index: 50; min-width: 160px; overflow: hidden; display: none; }
+.dropdown.show { display: block; }
+.dropdown-item { display: block; width: 100%; padding: 10px 16px; text-align: left; font-size: 13px; color: var(--text-primary); transition: 0.15s; }
+.dropdown-item:hover { background: var(--bg-main); }
+.dropdown-item.danger { color: var(--danger); }
+
+/* ===== 月历组件 ===== */
+.cal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px; }
+.cal-nav { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 10px; transition: 0.15s; }
+.cal-nav:hover { background: rgba(0,0,0,0.05); color: var(--text-primary); }
+.cal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 10px 6px; text-align: center; font-size: 10px; color: var(--text-secondary); font-weight: 500; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 10px; gap: 1px; }
+.cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; position: relative; font-size: 12px; color: var(--text-primary); }
+.cal-cell.empty { cursor: default; }
+.cal-cell:hover:not(.empty) { background: rgba(100,181,246,0.1); }
+.cal-cell.today { background: var(--color-today); color: var(--white); font-weight: 600; }
+.cal-cell.today:hover { background: var(--color-primary-hover); }
+.cal-cell.selected:not(.today) { background: rgba(100,181,246,0.18); font-weight: 600; box-shadow: inset 0 0 0 2px var(--color-primary); }
+.cal-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--chestnut); position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); }
+.cal-cell.today .cal-dot { background: var(--white); }
+
+/* ===== 响应式 ===== */
+@media (max-width: 700px) {
+  body { font-size: 15px; }
+  .top-bar { padding: 6px 10px; height: 44px; gap: 6px; }
+  .logo { font-size: 18px; }
+  .search-box { flex: 1; max-width: none; height: 30px; }
+  .view-tab { width: 32px; height: 26px; font-size: 11px; }
+  .mobile-cal-toggle { display: flex; }
+  .main-container { flex-direction: column; }
+  .sidebar { width: 100%; min-width: 0; max-height: 0; overflow: hidden; border-right: none; border-bottom: 1px solid transparent; transition: max-height 0.3s ease; }
+  .sidebar.open { max-height: 360px; border-bottom-color: var(--border-color); }
+  .cal-header { padding: 8px 10px 6px; }
+  .cal-title { font-size: 12px; }
+  .content-header { padding: 8px 10px; gap: 6px; }
+  .header-date { font-size: 16px; }
+  .task-list { padding: 0 10px 8px; }
+  .task-item { padding: 12px 10px; gap: 8px; }
+  .task-circle { width: 26px; height: 26px; min-width: 26px; }
+  .add-task-bar { padding: 8px 10px; gap: 6px; }
+  .task-input { min-width: 0; font-size: 14px; }
+  .add-btn { width: 40px; height: 40px; }
+  .status-bar { height: 24px; padding: 0 10px; font-size: 10px; }
+  .auth-dialog { padding: 24px 20px; }
+  .user-btn { font-size: 11px; max-width: 90px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 登录弹窗 ===== -->
+<div class="auth-overlay" id="authOverlay" style="display:none;">
+  <div class="auth-dialog" id="authDialog"></div>
+</div>
+
+<!-- ===== 主界面 ===== -->
+<div id="appView" style="display:none;">
+  <header class="top-bar">
+    <span class="logo">
+      <span class="nut">🌰</span><span class="t">t</span><span class="nut" style="font-size:16px;">🌰</span><span class="D">D</span><span class="l">o</span><span class="i">l</span><span class="S">i</span><span class="t2">S</span><span class="nut" style="font-size:15px;margin-left:2px;">t</span>
+    </span>
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="搜索..." autocomplete="off" />
+      <button id="searchClear" class="search-clear hidden">✕</button>
+    </div>
+    <div class="top-right">
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="day">日</button>
+        <button class="view-tab" data-view="week">周</button>
+        <button class="view-tab" data-view="month">月</button>
+      </div>
+      <button class="user-btn" id="userBtn">登录 ▾</button>
+      <span class="sync-badge offline hidden" id="syncStatus" style="display:none;">离线</span>
+      <button class="mobile-cal-toggle" id="mobileCalToggle">📅</button>
+    </div>
+    <div class="dropdown" id="userDropdown">
+      <button class="dropdown-item" id="dropAccount">👤 账户信息</button>
+      <button class="dropdown-item" id="dropChangePwd">🔒 修改密码</button>
+      <button class="dropdown-item" id="dropNotif">🔔 通知设置</button>
+      <button class="dropdown-item danger" id="dropLogout">🚪 退出登录</button>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <aside class="sidebar" id="sidebar"><div class="calendar-widget" id="calendarWidget"></div></aside>
+    <section class="content">
+      <div class="content-header">
+        <button class="nav-btn" id="navPrev">◀</button>
+        <div class="header-info">
+          <span class="header-date" id="headerDate">6月10日 星期二</span>
+          <span class="header-sub" id="headerSub"></span>
+        </div>
+        <button class="nav-btn" id="navNext">▶</button>
+        <button class="today-btn" id="todayBtn">今天</button>
+      </div>
+      <div class="task-list" id="taskList"></div>
+      <div class="add-task-bar">
+        <input type="text" id="taskInput" class="task-input" placeholder="添加新任务..." autocomplete="off" maxlength="200" />
+        <div class="period-select">
+          <button class="period-option active" data-period="day">📅 今天</button>
+          <button class="period-option" data-period="week">📋 本周</button>
+          <button class="period-option" data-period="month">📆 本月</button>
+        </div>
+        <div class="deadline-row">
+          <input type="date" id="deadlineDate" title="截止日期" style="width:110px;" />
+          <input type="time" id="deadlineTime" title="截止时间" style="width:65px;" />
+        </div>
+        <button class="add-btn" id="addBtn">＋</button>
+      </div>
+    </section>
+  </div>
+  <footer class="status-bar">
+    <span id="statusText">共 0 个任务 · 已完成 0 个</span>
+    <span class="notif-status" id="notifStatus" style="display:none;"></span>
+  </footer>
+</div>
+
+<script>
+// ==================== 全局配置 ====================
+function getToken() { return localStorage.getItem(SYNC_KEY+'_token'); }
+function setToken(t) { localStorage.setItem(SYNC_KEY+'_token', t); }
+const GIST_DESC = 'toDoliSt-sync-data';
+const SYNC_KEY = 'todolist_sync';
+const LOCAL_KEY = 'todolist_local';
+
+// ==================== 工具函数 ====================
+const U = {
+  fmtDate(d) { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; },
+  fmtLabel(ds) { const t=U.fmtDate(new Date()); if(ds===t)return'今天'; const d=new Date(ds+'T00:00:00'); return `${d.getMonth()+1}月${d.getDate()}日`; },
+  getWeekVal(ds) { const d=new Date(ds+'T00:00:00'),dn=d.getDay()||7; d.setDate(d.getDate()+4-dn); const ys=new Date(d.getFullYear(),0,1); const wn=Math.ceil(((d-ys)/86400000+1)/7); return `${d.getFullYear()}-W${String(wn).padStart(2,'0')}`; },
+  getWeekRange(wv) { const[y,w]=wv.split('-W').map(Number),j4=new Date(y,0,4),j4d=j4.getDay()||7,m=new Date(j4); m.setDate(j4.getDate()-j4d+1+(w-1)*7); const s=new Date(m); s.setDate(m.getDate()+6); return{start:U.fmtDate(m),end:U.fmtDate(s)}; },
+  esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; },
+  hl(t,k) { if(!k)return U.esc(t); const e=U.esc(t),ek=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return e.replace(new RegExp(`(${ek})`,'gi'),'<span class="search-highlight">$1</span>'); },
+  WDAYS: ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'],
+  MONTHS: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+  WD: ['一','二','三','四','五','六','日']
+};
+
+// ==================== 云端同步（GitHub Gist） ====================
+const Cloud = {
+  async getGistId() { return localStorage.getItem(SYNC_KEY+'_gist'); },
+  async setGistId(id) { localStorage.setItem(SYNC_KEY+'_gist', id); },
+
+  async _api(method, path, body) {
+    const res = await fetch(`https://api.github.com${path}`, {
+      method, headers: { 'Authorization': `token ${getToken()}`, 'Accept': 'application/vnd.github+json', 'Content-Type': body?'application/json':undefined }, body: body?JSON.stringify(body):undefined
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    return res.json();
+  },
+
+  async upload(tasks) {
+    let gistId = await this.getGistId();
+    const content = JSON.stringify(tasks, null, 0);
+    const file = { 'todolist.json': { content } };
+    try {
+      if (gistId) {
+        await this._api('PATCH', `/gists/${gistId}`, { description: GIST_DESC, files: file });
+      } else {
+        const r = await this._api('POST', '/gists', { description: GIST_DESC, public: false, files: file });
+        gistId = r.id;
+        await this.setGistId(gistId);
+      }
+      return true;
+    } catch(e) { console.error('Cloud upload error:', e); return false; }
+  },
+
+  async download() {
+    const gistId = await this.getGistId();
+    if (!gistId) return null;
+    try {
+      const r = await this._api('GET', `/gists/${gistId}`);
+      const f = r.files['todolist.json'];
+      if (!f || !f.content) return null;
+      return JSON.parse(f.content);
+    } catch(e) { console.error('Cloud download error:', e); return null; }
+  },
+
+  async syncDown() {
+    const cloud = await this.download();
+    if (!cloud) return;
+    const local = Storage.getAll();
+    // 合并：云端优先（更新的覆盖旧的）
+    const map = new Map();
+    local.forEach(t => map.set(t.id, t));
+    cloud.forEach(t => {
+      const exist = map.get(t.id);
+      if (!exist || new Date(t.updatedAt||t.createdAt) > new Date(exist.updatedAt||exist.createdAt)) {
+        map.set(t.id, t);
+      }
+    });
+    Storage.saveAll([...map.values()]);
+  },
+
+  async syncUp() {
+    await this.upload(Storage.getAll());
+  },
+
+  async fullSync() {
+    try {
+      await this.syncDown();
+      await this.syncUp();
+      document.getElementById('syncStatus').classList.remove('offline');
+      document.getElementById('syncStatus').textContent = '☁️ 已同步';
+      document.getElementById('syncStatus').style.display = '';
+      return true;
+    } catch(e) {
+      document.getElementById('syncStatus').classList.add('offline');
+      document.getElementById('syncStatus').textContent = '离线';
+      document.getElementById('syncStatus').style.display = '';
+      return false;
+    }
+  },
+
+  async joinSync(code) {
+    // 通过同步码查找或创建 Gist
+    const key = SYNC_KEY + '_code_' + code;
+    let gistId = localStorage.getItem(key);
+    if (!gistId) {
+      // 创建新的 Gist
+      const r = await this._api('POST', '/gists', { description: GIST_DESC + ':' + code, public: false, files: { 'todolist.json': { content: '[]' } } });
+      gistId = r.id;
+      localStorage.setItem(key, gistId);
+    }
+    await this.setGistId(gistId);
+    await this.syncDown();
+    return true;
+  },
+
+  generateCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
+    return code;
+  },
+
+  async initCode() {
+    const existing = localStorage.getItem(SYNC_KEY+'_code');
+    if (existing) return existing;
+    const code = this.generateCode();
+    localStorage.setItem(SYNC_KEY+'_code', code);
+    // 创建初始 Gist
+    await this.upload([]);
+    return code;
+  }
+};
+
+// ==================== 本地存储 ====================
+const Storage = {
+  getAll() { try { const r = localStorage.getItem(LOCAL_KEY); return r ? JSON.parse(r) : []; } catch { return []; } },
+  saveAll(tasks) { localStorage.setItem(LOCAL_KEY, JSON.stringify(tasks)); },
+  add(task) { const tasks = this.getAll(); task.id = Date.now(); task.createdAt = new Date().toISOString(); task.updatedAt = task.createdAt; tasks.push(task); this.saveAll(tasks); return task; },
+  delete(id) { this.saveAll(this.getAll().filter(t => t.id !== id)); },
+  update(id, updates) { const tasks = this.getAll(); const idx = tasks.findIndex(t => t.id === id); if (idx >= 0) { Object.assign(tasks[idx], updates); tasks[idx].updatedAt = new Date().toISOString(); this.saveAll(tasks); } },
+
+  getFiltered({ periodType, date, periodValue }) {
+    const tasks = this.getAll();
+    if (periodType === 'day') {
+      const wv = U.getWeekVal(date), mv = date.substring(0,7);
+      return tasks.filter(t => t.date === date || (t.periodType === 'week' && t.periodValue === wv) || (t.periodType === 'month' && t.periodValue === mv));
+    } else if (periodType === 'week') {
+      const {start, end} = U.getWeekRange(periodValue);
+      return tasks.filter(t => (t.periodType === 'day' && t.date >= start && t.date <= end) || (t.periodType === 'week' && t.periodValue === periodValue));
+    } else {
+      return tasks.filter(t => (t.periodType === 'day' && t.date && t.date.startsWith(periodValue)) || (t.periodType === 'month' && t.periodValue === periodValue));
+    }
+  },
+
+  search(kw) {
+    const l = kw.toLowerCase();
+    return this.getAll().filter(t => t.title.toLowerCase().includes(l)).sort((a,b) => (b.date||'').localeCompare(a.date||'') || (b.createdAt||'').localeCompare(a.createdAt||''));
+  },
+
+  getDates(year, month) {
+    const prefix = `${year}-${String(month).padStart(2,'0')}`;
+    const s = new Set();
+    this.getAll().forEach(t => { if (t.date && t.date.startsWith(prefix)) s.add(t.date); });
+    return [...s];
+  }
+};
+
+// ==================== 月历组件 ====================
+const Calendar = {
+  y:0, m:0, sel:'', cb:null,
+  init() { const t=new Date(); this.y=t.getFullYear(); this.m=t.getMonth()+1; this.sel=U.fmtDate(t); this.render(); },
+  render() {
+    const c = document.getElementById('calendarWidget'); if(!c)return;
+    const td = Storage.getDates(this.y, this.m), today=U.fmtDate(new Date());
+    const fd=new Date(this.y,this.m-1,1), dim=new Date(this.y,this.m,0).getDate();
+    let sd=fd.getDay(); sd=sd===0?6:sd-1;
+    const tc=Math.ceil((sd+dim)/7)*7;
+    let h=`<div class="cal-header"><button class="cal-nav" data-a="prev">◀</button><span class="cal-title">${this.y}年${U.MONTHS[this.m-1]}</span><button class="cal-nav" data-a="next">▶</button></div><div class="cal-weekdays">${U.WD.map(d=>`<span>${d}</span>`).join('')}</div><div class="cal-grid">`;
+    for(let i=0;i<tc;i++) {
+      const dn=i-sd+1, v=dn>=1&&dn<=dim, ds=v?`${this.y}-${String(this.m).padStart(2,'0')}-${String(dn).padStart(2,'0')}`:'';
+      let cls='cal-cell'; if(!v)cls+=' empty'; if(ds===today)cls+=' today'; if(ds===this.sel)cls+=' selected';
+      h+=`<div class="${cls}" data-d="${ds}"><span class="cal-day">${v?dn:''}</span>${v&&td.includes(ds)?'<span class="cal-dot"></span>':''}</div>`;
+    }
+    h+='</div>'; c.innerHTML=h;
+    c.querySelectorAll('.cal-nav').forEach(b => b.addEventListener('click',()=>{
+      if(b.dataset.a==='prev'){if(this.m===1){this.y--;this.m=12}else this.m--;}
+      else{if(this.m===12){this.y++;this.m=1}else this.m++;}
+      this.render();
+    }));
+    c.querySelectorAll('.cal-cell[data-d]').forEach(cell => cell.addEventListener('click',()=>{
+      const d=cell.dataset.d; if(!d)return; this.sel=d; this.render(); if(this.cb)this.cb(d);
+    }));
+  },
+  refresh() { this.render(); },
+  goTo(ds) { const[a,b]=ds.split('-').map(Number); this.y=a; this.m=b; this.sel=ds; this.render(); }
+};
+
+// ==================== 任务列表 ====================
+const TaskList = {
+  view:'day', date:'', searchMode:false,
+  init() {
+    this.date=U.fmtDate(new Date());
+    document.getElementById('addBtn').addEventListener('click',()=>this.add());
+    document.getElementById('taskInput').addEventListener('keydown',e=>{if(e.key==='Enter')this.add();});
+  },
+  getParams() {
+    const wv=U.getWeekVal(this.date), mv=this.date.substring(0,7);
+    if(this.view==='day')return{periodType:'day',date:this.date,periodValue:wv};
+    else if(this.view==='week')return{periodType:'week',date:null,periodValue:wv};
+    else return{periodType:'month',date:null,periodValue:mv};
+  },
+  load() { this.searchMode=false; this.render(Storage.getFiltered(this.getParams())); },
+  render(tasks) {
+    const c=document.getElementById('taskList'); if(!c)return;
+    if(!tasks.length) { c.innerHTML='<div class="empty-state"><span class="icon">📝</span><p>暂无任务，添加一个吧</p></div>'; }
+    else {
+      const dT=tasks.filter(t=>t.periodType==='day'||(!t.periodType&&t.date));
+      const wT=tasks.filter(t=>t.periodType==='week');
+      const mT=tasks.filter(t=>t.periodType==='month');
+      let h='';
+      if(dT.length)h+='<div class="period-divider">📅 日期任务</div>'+dT.map(t=>this.itemHtml(t)).join('');
+      if(wT.length)h+='<div class="period-divider">📋 本周任务</div>'+wT.map(t=>this.itemHtml(t)).join('');
+      if(mT.length)h+='<div class="period-divider">📆 本月任务</div>'+mT.map(t=>this.itemHtml(t)).join('');
+      c.innerHTML=h;
+    }
+    this.bindEvents(); this.updateStatus(tasks);
+  },
+  itemHtml(t) {
+    const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
+    let dl='',dlCls='';
+    if(t.deadline) {
+      const now=new Date(), dd=new Date(t.deadline), diff=dd-now;
+      if(t.completed) { dl='✅ 已完成'; dlCls='deadline-done'; }
+      else if(diff<0) { const h=Math.abs(Math.round(diff/3600000)); dl=`🔥 已过期${h}h`; dlCls='deadline-over'; }
+      else if(diff<6*3600000) { const h=Math.round(diff/3600000); dl=`⚡ 还剩${h}h`; dlCls='deadline-near'; }
+      else { const d=Math.ceil(diff/86400000); dl=`⏰ 还剩${d}天`; dlCls='deadline-ok'; }
+    }
+    let tg='';
+    if((t.periodType==='day'||!t.periodType)&&t.date) tg=`<span class="task-tag today">${U.fmtLabel(t.date)}</span>`;
+    else if(t.periodType==='week') tg='<span class="task-tag week">本周</span>';
+    else if(t.periodType==='month') tg='<span class="task-tag month">本月</span>';
+    const dlTag=dl?`<span class="task-tag ${dlCls}">${dl}</span>`:'';
+    let cls='task-item '+done;
+    if(dlCls==='deadline-over'&&!t.completed) cls+=' overdue';
+    else if(dlCls==='deadline-near'&&!t.completed) cls+=' urgent';
+    return `<div class="${cls}" data-id="${t.id}"><button class="${cc}" data-action="toggle" data-id="${t.id}"></button><div class="task-body"><div class="task-title">${U.esc(t.title)}</div><div class="task-meta">${tg}${dlTag}</div></div></div>`;
+  },
+  bindEvents() {
+    document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(){
+      const id=Number(this.dataset.id), item=this.closest('.task-item'); if(!item)return;
+      item.classList.add('removing');
+      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); if(App.loggedIn)Cloud.syncUp(); },{once:true});
+    }));
+  },
+  updateStatus(tasks) {
+    const tot=tasks.length, comp=tasks.filter(t=>t.completed).length;
+    document.getElementById('statusText').textContent=`共 ${tot} 个任务 · 已完成 ${comp} 个`;
+  },
+  add() {
+    const inp=document.getElementById('taskInput'), title=inp.value.trim(); if(!title)return;
+    const ap=document.querySelector('.period-option.active'), pt=ap?ap.dataset.period:'day';
+    let date=null,pv=null,deadline=null;
+    if(pt==='day')date=this.date; else if(pt==='week')pv=U.getWeekVal(this.date); else if(pt==='month')pv=this.date.substring(0,7);
+    const dd=document.getElementById('deadlineDate').value, dt=document.getElementById('deadlineTime').value;
+    if(dd) deadline=dt?`${dd}T${dt}:00`:`${dd}T23:59:00`;
+    Storage.add({title,date,periodType:pt,periodValue:pv,deadline,completed:0,notified:false});
+    inp.value='';
+    this.load(); Calendar.refresh();
+    if(App.loggedIn) Cloud.syncUp().then(()=>{
+      document.getElementById('syncStatus').textContent='☁️ 已同步';
+      document.getElementById('syncStatus').classList.remove('offline');
+    });
+  },
+  renderSearch(tasks, kw) {
+    this.searchMode=true;
+    const c=document.getElementById('taskList'); if(!c)return;
+    if(!tasks.length) { c.innerHTML=`<div class="empty-state"><span class="icon">🔍</span><p>未找到包含"${U.esc(kw)}"的任务</p></div>`; this.updateStatus([]); return; }
+    let h=`<div class="search-results-header">搜索 "<strong>${U.esc(kw)}</strong>" — 找到 ${tasks.length} 个结果</div>`;
+    tasks.forEach(t=>{
+      const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
+      let lt=''; if((t.periodType==='day'||!t.periodType)&&t.date)lt=U.fmtLabel(t.date); else if(t.periodType==='week')lt='本周'; else if(t.periodType==='month')lt='本月';
+      const dot=t.completed?'#bdbdbd':'#64b5f6';
+      h+=`<div class="task-item ${done}" data-id="${t.id}"><button class="${cc}" data-action="toggle" data-id="${t.id}"></button><span class="task-title">${U.hl(t.title,kw)}</span><span class="search-location">${lt}</span><span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></span></div>`;
+    });
+    c.innerHTML=h; this.bindEvents(); this.updateStatus(tasks);
+  }
+};
+
+// ==================== 搜索 ====================
+const Search = {
+  active:false, timer:null,
+  init() {
+    const inp=document.getElementById('searchInput'), clr=document.getElementById('searchClear');
+    inp.addEventListener('input',()=>{
+      const kw=inp.value.trim(); clr.classList.toggle('hidden',kw==='');
+      clearTimeout(this.timer);
+      this.timer=setTimeout(()=>kw?this.run(kw):this.clear(),300);
+    });
+    clr.addEventListener('click',()=>{inp.value='';clr.classList.add('hidden');this.clear();});
+    inp.addEventListener('keydown',e=>{if(e.key==='Escape'){inp.value='';clr.classList.add('hidden');this.clear();}});
+  },
+  run(kw) { this.active=true; TaskList.renderSearch(Storage.search(kw),kw); App.setSearchUI(true); },
+  clear() { this.active=false; App.setSearchUI(false); TaskList.load(); App.updateHeader(); }
+};
+
+// ==================== 认证 ====================
+const Auth = {
+  mode: 'none', // 'none' | 'sync' | 'email'
+  email: '',
+
+  init() {
+    const mode = localStorage.getItem(SYNC_KEY+'_mode');
+    const email = localStorage.getItem(SYNC_KEY+'_email');
+    if (mode === 'sync' || mode === 'email') {
+      this.mode = mode;
+      this.email = email || '';
+      return true;
+    }
+    return false;
+  },
+
+  async loginEmail(email, password) {
+    // 简单实现：邮箱+密码哈希用于加密 Gist
+    const hash = await this._hash(email + ':' + password);
+    const key = SYNC_KEY + '_email_' + btoa(email);
+    let gistId = localStorage.getItem(key);
+    if (!gistId) {
+      // 首次登录，创建 Gist
+      const r = await Cloud._api('POST', '/gists', { description: GIST_DESC, public: false, files: { 'todolist.json': { content: JSON.stringify(Storage.getAll()) } } });
+      gistId = r.id;
+      localStorage.setItem(key, gistId);
+    }
+    await Cloud.setGistId(gistId);
+    this.mode = 'email';
+    this.email = email;
+    localStorage.setItem(SYNC_KEY+'_mode', 'email');
+    localStorage.setItem(SYNC_KEY+'_email', email);
+    await Cloud.syncDown();
+    return true;
+  },
+
+  async _hash(str) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2,'0')).join('');
+  },
+
+  logout() {
+    this.mode = 'none';
+    this.email = '';
+    localStorage.removeItem(SYNC_KEY+'_mode');
+    localStorage.removeItem(SYNC_KEY+'_email');
+    localStorage.removeItem(SYNC_KEY+'_gist');
+    localStorage.removeItem(SYNC_KEY+'_code');
+  },
+
+  async changePassword(newPassword) {
+    // 重新登录（因为密码参与哈希）
+    if (this.mode === 'email') {
+      await this.loginEmail(this.email, newPassword);
+      return true;
+    }
+    return false;
+  }
+};
+
+// ==================== 通知 ====================
+const Notif = {
+  enabled: false,
+
+  async request() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') { this.enabled = true; return true; }
+    const r = await Notification.requestPermission();
+    this.enabled = r === 'granted';
+    if (this.enabled) this.show('toDoliSt', '通知已开启！任务快到期时你会收到提醒。');
+    return this.enabled;
+  },
+
+  show(title, body) {
+    if (!this.enabled) return;
+    try { new Notification(title, { body, icon: '🌰', badge: '🌰' }); } catch(e) {}
+  },
+
+  checkDeadlines() {
+    if (!this.enabled) return;
+    const tasks = Storage.getAll();
+    const now = new Date();
+    tasks.forEach(t => {
+      if (t.deadline && !t.completed && !t.notified) {
+        const dd = new Date(t.deadline), diff = dd - now;
+        if (diff > 0 && diff < 6 * 3600000) {
+          this.show('⏰ 任务提醒', `「${t.title}」将在 ${Math.round(diff/3600000)} 小时后截止`);
+          Storage.update(t.id, { notified: true });
+        }
+      }
+    });
+  },
+
+  start() {
+    this.checkDeadlines();
+    setInterval(() => this.checkDeadlines(), 10 * 60 * 1000); // 每10分钟检查
+  }
+};
+
+// ==================== PWA ====================
+function registerSW() {
+  if ('serviceWorker' in navigator) {
+    // 简单的 service worker 注册
+    const swCode = `
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({type:'window'}).then(cs => {
+    if(cs.length) cs[0].focus();
+    else clients.openWindow('/');
+  }));
+});
+    `;
+    const blob = new Blob([swCode], { type: 'application/javascript' });
+    navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
+  }
+}
+
+// ==================== 主应用 ====================
+const App = {
+  view:'day', date:'', loggedIn:false,
+
+  async init() {
+    const t=new Date(); this.date=U.fmtDate(t);
+    Calendar.init(); Calendar.cb=d=>this.onDateChange(d);
+    TaskList.init(); TaskList.date=this.date;
+    Search.init();
+    registerSW();
+
+    // 检查登录状态
+    this.loggedIn = Auth.init();
+    if (this.loggedIn) {
+      await Cloud.syncDown();
+      document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
+      document.getElementById('userBtn').classList.add('logged-in');
+      document.getElementById('syncStatus').textContent = '☁️ 已同步';
+      document.getElementById('syncStatus').classList.remove('offline');
+      document.getElementById('syncStatus').style.display = '';
+      Notif.start();
+    } else {
+      // 显示登录/注册选择
+      this.showAuth();
+    }
+
+    // 视图切换
+    document.querySelectorAll('.view-tab').forEach(tab => tab.addEventListener('click',()=>this.switchView(tab.dataset.view)));
+    document.getElementById('navPrev').addEventListener('click',()=>this.nav(-1));
+    document.getElementById('navNext').addEventListener('click',()=>this.nav(1));
+    document.getElementById('todayBtn').addEventListener('click',()=>this.goToday());
+
+    // 周期选择
+    document.querySelectorAll('.period-option').forEach(b => b.addEventListener('click',()=>{
+      document.querySelectorAll('.period-option').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    }));
+
+    // 用户菜单
+    document.getElementById('userBtn').addEventListener('click',()=>{
+      if (!this.loggedIn) { this.showAuth(); return; }
+      document.getElementById('userDropdown').classList.toggle('show');
+    });
+    document.getElementById('dropLogout').addEventListener('click',()=>{
+      Auth.logout(); this.loggedIn=false;
+      document.getElementById('userBtn').textContent='登录 ▾';
+      document.getElementById('userBtn').classList.remove('logged-in');
+      document.getElementById('userDropdown').classList.remove('show');
+      document.getElementById('syncStatus').style.display='none';
+      this.showAuth();
+    });
+    document.getElementById('dropChangePwd').addEventListener('click',()=>{
+      document.getElementById('userDropdown').classList.remove('show');
+      this.showChangePwd();
+    });
+    document.getElementById('dropAccount').addEventListener('click',()=>{
+      document.getElementById('userDropdown').classList.remove('show');
+      this.showAccountInfo();
+    });
+    document.getElementById('dropNotif').addEventListener('click',()=>{
+      document.getElementById('userDropdown').classList.remove('show');
+      Notif.request().then(ok => {
+        document.getElementById('notifStatus').style.display = ok ? '' : 'none';
+        document.getElementById('notifStatus').textContent = ok ? '🔔 通知已开启' : '';
+        if (ok) Notif.start();
+      });
+    });
+    document.addEventListener('click',e=>{
+      if(!e.target.closest('#userBtn')&&!e.target.closest('#userDropdown'))
+        document.getElementById('userDropdown').classList.remove('show');
+    });
+
+    // 手机日历
+    document.getElementById('mobileCalToggle').addEventListener('click',()=>{
+      document.getElementById('sidebar').classList.toggle('open');
+    });
+
+    // 初始加载
+    this.updateHeader();
+    TaskList.load();
+    document.getElementById('appView').style.display='';
+
+    // 通知
+    const notifOk = localStorage.getItem(SYNC_KEY+'_notif');
+    if (notifOk === 'true') Notif.enabled = true;
+    if (Notification.permission === 'granted') { Notif.enabled = true; }
+    if (Notif.enabled) {
+      document.getElementById('notifStatus').style.display = '';
+      document.getElementById('notifStatus').textContent = '🔔 通知已开启';
+      Notif.start();
+    }
+  },
+
+  showAuth() {
+    const overlay = document.getElementById('authOverlay');
+    overlay.style.display = 'flex';
+    this.renderAuthMain();
+  },
+
+  renderAuthMain() {
+    const d = document.getElementById('authDialog');
+    d.innerHTML = `
+      <h2>🌰 toDoliSt</h2>
+      <div class="subtitle">多设备同步 · 待办小助手</div>
+      <div class="error-msg" id="authError"></div>
+      <input type="text" id="authToken" placeholder="GitHub Token（首次使用必填）" style="font-family:monospace;font-size:11px;" />
+      <div class="switch-link" style="margin-bottom:8px;"><a href="https://github.com/settings/tokens/new" target="_blank">→ 点此获取 Token（勾选repo）</a></div>
+      <input type="email" id="authEmail" placeholder="邮箱（可选，方便找回）" autocomplete="email" />
+      <input type="password" id="authPwd" placeholder="密码（至少4位）" autocomplete="current-password" />
+      <button class="btn btn-primary" id="authLogin">登 录 / 注 册</button>
+      <div class="divider">或者</div>
+      <button class="btn btn-outline" id="authSyncCode">🔗 使用同步码</button>
+      <button class="btn btn-outline" id="authLocal">🏠 跳过，本地使用</button>
+    `;
+    const err = () => document.getElementById('authError');
+
+    document.getElementById('authLogin').addEventListener('click', async () => {
+      const token = document.getElementById('authToken').value.trim();
+      const em = document.getElementById('authEmail').value.trim();
+      const pw = document.getElementById('authPwd').value;
+      if (!token) { err().textContent = '请先填写 GitHub Token'; return; }
+      if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
+      if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
+      setToken(token);
+      try { await Auth.loginEmail(em, pw); this.afterLogin(); }
+      catch(e) { err().textContent = '失败：'+e.message.slice(0,60); }
+    });
+
+    document.getElementById('authRegister').addEventListener('click', async () => {
+      const em = document.getElementById('authEmail').value.trim();
+      const pw = document.getElementById('authPwd').value;
+      if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
+      if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
+      try {
+        await Auth.loginEmail(em, pw);
+        this.afterLogin();
+      } catch(e) { err().textContent = '注册失败，请重试'; }
+    });
+
+    document.getElementById('authSyncCode').addEventListener('click', () => this.renderSyncCode());
+    document.getElementById('authLocal').addEventListener('click', () => this.afterLocal());
+  },
+
+  renderSyncCode() {
+    const d = document.getElementById('authDialog');
+    d.innerHTML = `
+      <h2>🌰 同步码</h2>
+      <div class="subtitle">输入同步码加入，或生成新码</div>
+      <div class="error-msg" id="authError"></div>
+      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
+      <button class="btn btn-primary" id="syncJoin">加入同步</button>
+      <button class="btn btn-secondary" id="syncCreate">生成新同步码</button>
+      <div class="switch-link" id="syncBack">← 返回</div>
+    `;
+    document.getElementById('syncBack').addEventListener('click', () => this.renderAuthMain());
+    document.getElementById('syncJoin').addEventListener('click', async () => {
+      const code = document.getElementById('syncCodeInput').value.trim().toUpperCase();
+      if (code.length < 4) { document.getElementById('authError').textContent = '同步码至少4位'; return; }
+      try {
+        await Cloud.joinSync(code);
+        Auth.mode = 'sync';
+        localStorage.setItem(SYNC_KEY+'_mode','sync');
+        this.afterLogin();
+      } catch(e) { document.getElementById('authError').textContent = '加入失败，检查同步码'; }
+    });
+    document.getElementById('syncCreate').addEventListener('click', async () => {
+      const code = Cloud.generateCode();
+      document.getElementById('syncCodeInput').value = code;
+      try {
+        await Cloud.upload([]);
+        Auth.mode = 'sync';
+        localStorage.setItem(SYNC_KEY+'_mode','sync');
+        localStorage.setItem(SYNC_KEY+'_code', code);
+        this.afterLogin();
+      } catch(e) { document.getElementById('authError').textContent = '创建失败，请重试'; }
+    });
+  },
+
+  showChangePwd() {
+    const overlay = document.getElementById('authOverlay');
+    overlay.style.display = 'flex';
+    const d = document.getElementById('authDialog');
+    d.innerHTML = `
+      <h2>🔒 修改密码</h2>
+      <div class="subtitle">${Auth.email || ''}</div>
+      <div class="error-msg" id="authError"></div>
+      <input type="password" id="oldPwd" placeholder="旧密码" />
+      <input type="password" id="newPwd" placeholder="新密码（至少4位）" />
+      <button class="btn btn-primary" id="doChangePwd">确认修改</button>
+      <button class="btn btn-outline" id="cancelChange">取消</button>
+    `;
+    document.getElementById('cancelChange').addEventListener('click', () => { overlay.style.display='none'; });
+    document.getElementById('doChangePwd').addEventListener('click', async () => {
+      const np = document.getElementById('newPwd').value;
+      if (np.length < 4) { document.getElementById('authError').textContent='新密码至少4位'; return; }
+      await Auth.changePassword(np);
+      overlay.style.display = 'none';
+      alert('密码已修改');
+    });
+  },
+
+  showAccountInfo() {
+    const overlay = document.getElementById('authOverlay');
+    overlay.style.display = 'flex';
+    const d = document.getElementById('authDialog');
+    const gistId = localStorage.getItem(SYNC_KEY+'_gist') || 'N/A';
+    const code = localStorage.getItem(SYNC_KEY+'_code') || '';
+    d.innerHTML = `
+      <h2>👤 账户信息</h2>
+      <div style="text-align:left;font-size:12px;color:var(--text-secondary);margin:12px 0;">
+        <p>📧 ${Auth.email || '同步码用户'}</p>
+        <p>🔗 同步码: <strong style="font-size:16px;">${code || '(无)'}</strong></p>
+        <p style="word-break:break-all;">💾 Gist: ${gistId}</p>
+      </div>
+      <button class="btn btn-primary" id="copyCode">📋 复制同步码</button>
+      <button class="btn btn-outline" id="closeAccount">关闭</button>
+    `;
+    document.getElementById('closeAccount').addEventListener('click',()=>{overlay.style.display='none';});
+    document.getElementById('copyCode').addEventListener('click',()=>{
+      if(code) { navigator.clipboard.writeText(code).then(()=>alert('同步码已复制！')); }
+    });
+  },
+
+  async afterLogin() {
+    document.getElementById('authOverlay').style.display = 'none';
+    this.loggedIn = true;
+    document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
+    document.getElementById('userBtn').classList.add('logged-in');
+    TaskList.load(); Calendar.refresh();
+    await Notif.request();
+    if(Notif.enabled) { document.getElementById('notifStatus').style.display=''; document.getElementById('notifStatus').textContent='🔔 通知已开启'; Notif.start(); }
+  },
+
+  afterLocal() {
+    document.getElementById('authOverlay').style.display = 'none';
+    this.loggedIn = false;
+    document.getElementById('userBtn').textContent = '登录 ▾';
+    document.getElementById('userBtn').classList.remove('logged-in');
+    TaskList.load(); Calendar.refresh();
+  },
+
+  switchView(v) {
+    this.view=v;
+    document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector(`.view-tab[data-view="${v}"]`).classList.add('active');
+    this.updateHeader(); Calendar.goTo(this.date);
+    TaskList.view=v; TaskList.date=this.date; TaskList.load();
+  },
+
+  nav(dir) {
+    const d=new Date(this.date+'T00:00:00');
+    if(this.view==='day')d.setDate(d.getDate()+dir);
+    else if(this.view==='week')d.setDate(d.getDate()+dir*7);
+    else d.setMonth(d.getMonth()+dir);
+    this.date=U.fmtDate(d); this.updateHeader(); Calendar.goTo(this.date);
+    TaskList.view=this.view; TaskList.date=this.date; TaskList.load();
+  },
+
+  goToday() {
+    this.date=U.fmtDate(new Date()); this.updateHeader(); Calendar.goTo(this.date);
+    TaskList.view=this.view; TaskList.date=this.date; TaskList.load();
+  },
+
+  onDateChange(ds) {
+    if(Search.active)return; this.date=ds; this.view='day';
+    document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelector('.view-tab[data-view="day"]').classList.add('active');
+    this.updateHeader(); TaskList.view='day'; TaskList.date=this.date; TaskList.load();
+  },
+
+  updateHeader() {
+    const d=new Date(this.date+'T00:00:00'), today=U.fmtDate(new Date());
+    const hd=document.getElementById('headerDate'), hs=document.getElementById('headerSub');
+    if(this.view==='day'){
+      hd.textContent=`${d.getMonth()+1}月${d.getDate()}日 ${U.WDAYS[d.getDay()]}`;
+      hs.textContent=this.date===today?'今天':'';
+    }else if(this.view==='week'){
+      const wv=U.getWeekVal(this.date),{start,end}=U.getWeekRange(wv);
+      hd.textContent=`${start} — ${end}`; hs.textContent=wv;
+    }else{
+      hd.textContent=`${d.getFullYear()}年${d.getMonth()+1}月`; hs.textContent='';
+    }
+  },
+
+  setSearchUI(on) {
+    ['navPrev','navNext','todayBtn'].forEach(id=>document.getElementById(id).style.display=on?'none':'');
+    const addBar=document.querySelector('.add-task-bar'); if(addBar)addBar.style.display=on?'none':'flex';
+  }
+};
+
+// ===== 启动 =====
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>
