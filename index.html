@@ -139,16 +139,28 @@ a { color: var(--color-today); text-decoration: none; }
   to { opacity: 0; transform: translateX(20px) scale(0.9); }
 }
 
-/* 🌰 栗子圆圈按钮 */
+/* 🌰 栗子按钮 */
 .task-circle {
-  width: 24px; height: 24px; min-width: 24px; border-radius: 50%;
-  border: 2px solid var(--border-color); font-size: 15px;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  transition: 0.2s; line-height: 1;
+  width: 30px; height: 30px; min-width: 30px; border: none;
+  font-size: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  transition: 0.2s; line-height: 1; cursor: pointer; background: none;
+  border-radius: 50%; padding: 0;
 }
-.task-circle:hover { border-color: var(--chestnut); background: rgba(198,123,75,0.1); transform: scale(1.1); }
-.task-circle.done { border-color: var(--chestnut); background: var(--chestnut); }
-.task-circle.done::after { content: '✓'; color: var(--white); font-size: 11px; font-weight: 700; }
+.task-circle:hover { transform: scale(1.15); }
+.task-circle.done { opacity: 0.5; }
+.task-circle.done::after { content: ''; }
+
+/* 确认弹窗 */
+.confirm-popup {
+  position: absolute; background: var(--white); border: 1px solid var(--border-color);
+  border-radius: var(--radius-md); padding: 6px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  z-index: 40; display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap;
+}
+.confirm-popup button { padding: 4px 10px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 500; }
+.confirm-yes { background: var(--chestnut); color: var(--white); }
+.confirm-yes:hover { background: var(--chestnut-dark); }
+.confirm-no { background: var(--bg-main); color: var(--text-secondary); }
+.confirm-no:hover { background: var(--border-color); }
 
 .task-body { flex: 1; min-width: 0; }
 .task-title { font-size: 14px; line-height: 1.4; word-break: break-all; }
@@ -178,9 +190,11 @@ a { color: var(--color-today); text-decoration: none; }
 .period-option { padding: 5px 8px; border-radius: var(--radius-sm); font-size: 10px; color: var(--text-secondary); background: var(--bg-main); transition: 0.2s; white-space: nowrap; }
 .period-option:hover { background: var(--border-color); }
 .period-option.active { background: var(--color-primary); color: var(--white); }
-.deadline-row { display: flex; align-items: center; gap: 4px; }
-.deadline-row input { padding: 4px 6px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 11px; background: var(--white); }
-.deadline-row input:focus { border-color: var(--color-primary); }
+.time-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.time-label { font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.time-row input { padding: 3px 5px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 10px; background: var(--white); width: 90px; }
+.time-row input:focus { border-color: var(--color-primary); }
+.time-row input[type="time"] { width: 60px; }
 .add-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--chestnut); color: var(--white); font-size: 18px; display: flex; align-items: center; justify-content: center; transition: 0.2s; flex-shrink: 0; }
 .add-btn:hover { background: var(--chestnut-dark); transform: scale(1.05); }
 .add-btn:active { transform: scale(0.95); }
@@ -339,9 +353,13 @@ a { color: var(--color-today); text-decoration: none; }
           <button class="period-option" data-period="week">📋 本周</button>
           <button class="period-option" data-period="month">📆 本月</button>
         </div>
-        <div class="deadline-row">
-          <input type="date" id="deadlineDate" title="截止日期" style="width:110px;" />
-          <input type="time" id="deadlineTime" title="截止时间" style="width:65px;" />
+        <div class="time-row">
+          <span class="time-label">开始</span>
+          <input type="date" id="startDate" title="开始日期" />
+          <input type="time" id="startTime" title="开始时间" />
+          <span class="time-label">截止</span>
+          <input type="date" id="deadlineDate" title="截止日期" />
+          <input type="time" id="deadlineTime" title="截止时间" />
         </div>
         <button class="add-btn" id="addBtn">＋</button>
       </div>
@@ -369,6 +387,7 @@ const U = {
   getWeekRange(wv) { const[y,w]=wv.split('-W').map(Number),j4=new Date(y,0,4),j4d=j4.getDay()||7,m=new Date(j4); m.setDate(j4.getDate()-j4d+1+(w-1)*7); const s=new Date(m); s.setDate(m.getDate()+6); return{start:U.fmtDate(m),end:U.fmtDate(s)}; },
   esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; },
   hl(t,k) { if(!k)return U.esc(t); const e=U.esc(t),ek=k.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'); return e.replace(new RegExp('('+ek+')','gi'),'<span class=\"search-highlight\">$1</span>'); },
+  fmtDS(ds) { if(!ds)return''; const p=ds.indexOf('T'); const d=p>0?ds.slice(0,p):ds; const d2=new Date(d+'T00:00:00'); return (d2.getMonth()+1)+'/'+d2.getDate(); },
   WDAYS: ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'],
   MONTHS: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
   WD: ['一','二','三','四','五','六','日']
@@ -389,8 +408,10 @@ const Storage = {
       return tasks.filter(t => {
         // 直接归属这一天的 day 任务
         if (t.date === p.date) return true;
-        // deadline 跨天：date <= 今天 <= deadline，任务延续显示
-        if (t.periodType === 'day' && t.deadline && t.date <= p.date && t.deadline.substring(0,10) >= p.date) return true;
+        // startDate ~ deadline 跨天覆盖
+        const taskStart = t.startDate ? t.startDate.substring(0,10) : (t.date || '');
+        const taskEnd = t.deadline ? t.deadline.substring(0,10) : (t.date || '');
+        if (t.periodType === 'day' && taskStart && taskEnd && taskStart <= p.date && taskEnd >= p.date) return true;
         // 本周/本月周期任务
         if (t.periodType === 'week' && t.periodValue === wv) return true;
         if (t.periodType === 'month' && t.periodValue === mv) return true;
@@ -428,7 +449,19 @@ const Storage = {
   getDates(year, month) {
     const prefix = year+'-'+String(month).padStart(2,'0');
     const s = new Set();
-    this.getAll().forEach(t => { if (t.date && t.date.startsWith(prefix)) s.add(t.date); });
+    this.getAll().forEach(t => {
+      const ts = t.startDate ? t.startDate.substring(0,10) : (t.date||'');
+      const te = t.deadline ? t.deadline.substring(0,10) : (t.date||'');
+      if (!ts || !te) { if (t.date && t.date.startsWith(prefix)) s.add(t.date); return; }
+      // 遍历 startDate ~ deadline 中属于本月的日期
+      let cur = new Date(ts+'T00:00:00');
+      const end = new Date(te+'T00:00:00');
+      while (cur <= end) {
+        const ds = U.fmtDate(cur);
+        if (ds.startsWith(prefix)) s.add(ds);
+        cur.setDate(cur.getDate()+1);
+      }
+    });
     return [...s];
   },
 
@@ -439,19 +472,35 @@ const Storage = {
     const {start, end} = U.getWeekRange(wv);
     const monthPrefix = today.substring(0, 7);
 
-    // 今日：periodType='day' 且 deadline 在今天
-    const dayAll = tasks.filter(t => t.periodType==='day' && t.deadline);
-    const dayTotal = dayAll.filter(t => t.deadline.startsWith(today)).length;
-    const dayDone = dayAll.filter(t => t.deadline.startsWith(today) && t.completed).length;
+    // 今日：startDate/deadline 覆盖今天的 day 任务
+    const dayTasks = tasks.filter(t => t.periodType==='day');
+    const dayTotal = dayTasks.filter(t => {
+      const ts = t.startDate ? t.startDate.substring(0,10) : (t.date||'');
+      const te = t.deadline ? t.deadline.substring(0,10) : (t.date||'');
+      return ts <= today && te >= today;
+    }).length;
+    const dayDone = dayTasks.filter(t => {
+      const ts = t.startDate ? t.startDate.substring(0,10) : (t.date||'');
+      const te = t.deadline ? t.deadline.substring(0,10) : (t.date||'');
+      return t.completed && ts <= today && te >= today;
+    }).length;
 
-    // 本周：deadline 在本周范围内 + 本周周期任务
-    const weekDay = dayAll.filter(t => t.deadline >= start && t.deadline <= end);
+    // 本周
+    const weekDay = dayTasks.filter(t => {
+      const ts = t.startDate ? t.startDate.substring(0,10) : (t.date||'');
+      const te = t.deadline ? t.deadline.substring(0,10) : (t.date||'');
+      return (ts >= start && ts <= end) || (te >= start && te <= end) || (ts <= start && te >= end);
+    });
     const weekPeriod = tasks.filter(t => t.periodType==='week' && t.periodValue===wv);
     const weekTotal = weekDay.length + weekPeriod.length;
     const weekDone = weekDay.filter(t=>t.completed).length + weekPeriod.filter(t=>t.completed).length;
 
-    // 本月：deadline 在本月 + 本月周期任务
-    const monthDay = dayAll.filter(t => t.deadline.startsWith(monthPrefix));
+    // 本月
+    const monthDay = dayTasks.filter(t => {
+      const ts = (t.startDate||t.date||'').substring(0,7);
+      const te = (t.deadline||t.date||'').substring(0,7);
+      return ts === monthPrefix || te === monthPrefix;
+    });
     const monthPeriod = tasks.filter(t => t.periodType==='month' && t.periodValue===monthPrefix);
     const monthTotal = monthDay.length + monthPeriod.length;
     const monthDone = monthDay.filter(t=>t.completed).length + monthPeriod.filter(t=>t.completed).length;
@@ -521,7 +570,8 @@ const TaskList = {
     TaskList.bindEvents(); TaskList.updateStatus(tasks);
   },
   itemHtml(t) {
-    const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
+    const emoji = t.completed ? '✅' : '🌰';
+    const cc = t.completed ? 'task-circle done' : 'task-circle';
     let dl='',dlCls='';
     if(t.deadline) {
       const now=new Date(), dd=new Date(t.deadline), diff=dd-now;
@@ -531,20 +581,38 @@ const TaskList = {
       else { const d=Math.ceil(diff/86400000); dl='⏰ 还剩'+d+'天'; dlCls='deadline-ok'; }
     }
     let tg='';
-    if((t.periodType==='day'||!t.periodType)&&t.date) tg='<span class=\"task-tag today\">'+U.fmtLabel(t.date)+'</span>';
-    else if(t.periodType==='week') tg='<span class=\"task-tag week\">本周</span>';
-    else if(t.periodType==='month') tg='<span class=\"task-tag month\">本月</span>';
+    if(t.startDate && !t.completed) tg='<span class=\"task-tag\" style=\"background:rgba(123,198,110,0.12);color:#5a9;\">🕐 '+U.fmtDS(t.startDate)+'</span> ';
+    if((t.periodType==='day'||!t.periodType)&&t.date) tg+='<span class=\"task-tag today\">'+U.fmtLabel(t.date)+'</span>';
+    else if(t.periodType==='week') tg+='<span class=\"task-tag week\">本周</span>';
+    else if(t.periodType==='month') tg+='<span class=\"task-tag month\">本月</span>';
     const dlTag=dl?'<span class=\"task-tag '+dlCls+'\">'+dl+'</span>':'';
-    let cls='task-item '+done;
+    let cls='task-item '+ (t.completed?'done':'');
     if(dlCls==='deadline-over'&&!t.completed) cls+=' overdue';
     else if(dlCls==='deadline-near'&&!t.completed) cls+=' urgent';
-    return '<div class=\"'+cls+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\"></button><div class=\"task-body\"><div class=\"task-title\">'+U.esc(t.title)+'</div><div class=\"task-meta\">'+tg+dlTag+'</div></div></div>';
+    return '<div class=\"'+cls+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\">'+emoji+'</button><div class=\"task-body\"><div class=\"task-title\">'+U.esc(t.title)+'</div><div class=\"task-meta\">'+tg+dlTag+'</div></div></div>';
   },
   bindEvents() {
-    document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(){
+    document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(e){
+      e.stopPropagation();
       const id=Number(this.dataset.id), item=this.closest('.task-item'); if(!item)return;
-      item.classList.add('removing');
-      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); },{once:true});
+      if (item.querySelector('.confirm-popup')) return; // already showing
+      // 确认弹窗
+      const popup = document.createElement('div');
+      popup.className = 'confirm-popup';
+      popup.innerHTML = '确认完成？ <button class=\"confirm-yes\">✓</button><button class=\"confirm-no\">✕</button>';
+      popup.querySelector('.confirm-yes').addEventListener('click',(ev)=>{
+        ev.stopPropagation();
+        item.classList.add('removing');
+        item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); },{once:true});
+        popup.remove();
+      });
+      popup.querySelector('.confirm-no').addEventListener('click',(ev)=>{
+        ev.stopPropagation(); popup.remove();
+      });
+      item.appendChild(popup);
+      // 点击其他地方关闭
+      const closePopup = (ev) => { if (!popup.contains(ev.target) && ev.target !== b) { popup.remove(); document.removeEventListener('click', closePopup); } };
+      setTimeout(() => document.addEventListener('click', closePopup), 10);
     }));
   },
   updateStatus(tasks) {
@@ -559,7 +627,11 @@ const TaskList = {
     if(pt==='day')date=this.date; else if(pt==='week')pv=U.getWeekVal(this.date); else if(pt==='month')pv=this.date.substring(0,7);
     const dd=document.getElementById('deadlineDate').value, dt=document.getElementById('deadlineTime').value;
     if(dd) deadline=dt?dd+'T'+dt+':00':dd+'T23:59:00';
-    Storage.add({title,date,periodType:pt,periodValue:pv,deadline,completed:0,notified:false});
+    const sd=document.getElementById('startDate').value, st=document.getElementById('startTime').value;
+    let startDate=null;
+    if(sd) startDate=st?sd+'T'+st+':00':sd+'T00:00:00';
+    if(startDate) date=sd; // 有开始时间时，date 设为开始日期
+    Storage.add({title,date,periodType:pt,periodValue:pv,deadline,startDate,completed:0,notified:false});
     inp.value='';
     this.load(); Calendar.refresh();
   },
@@ -569,10 +641,10 @@ const TaskList = {
     if(!tasks.length) { c.innerHTML='<div class=\"empty-state\"><span class=\"icon\">🔍</span><p>未找到包含\"'+U.esc(kw)+'\"的任务</p></div>'; this.updateStatus([]); return; }
     let h='<div class=\"search-results-header\">搜索 \"<strong>'+U.esc(kw)+'</strong>\" — 找到 '+tasks.length+' 个结果</div>';
     tasks.forEach(t=>{
+      const emoji = t.completed ? '✅' : '🌰';
       const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
       let lt=''; if((t.periodType==='day'||!t.periodType)&&t.date)lt=U.fmtLabel(t.date); else if(t.periodType==='week')lt='本周'; else if(t.periodType==='month')lt='本月';
-      const dot=t.completed?'#bdbdbd':'#64b5f6';
-      h+='<div class=\"task-item '+done+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\"></button><span class=\"task-title\">'+U.hl(t.title,kw)+'</span><span class=\"search-location\">'+lt+'</span><span style=\"width:8px;height:8px;border-radius:50%;background:'+dot+';flex-shrink:0;\"></span></div>';
+      h+='<div class=\"task-item '+done+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\">'+emoji+'</button><span class=\"task-title\">'+U.hl(t.title,kw)+'</span><span class=\"search-location\">'+lt+'</span></div>';
     });
     c.innerHTML=h; this.bindEvents(); this.updateStatus(tasks);
   }
