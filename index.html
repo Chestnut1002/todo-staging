@@ -386,12 +386,37 @@ const Storage = {
     const tasks = this.getAll();
     if (p.periodType === 'day') {
       const wv = U.getWeekVal(p.date), mv = p.date.substring(0,7);
-      return tasks.filter(t => t.date === p.date || (t.periodType === 'week' && t.periodValue === wv) || (t.periodType === 'month' && t.periodValue === mv));
+      return tasks.filter(t => {
+        // 直接归属这一天的 day 任务
+        if (t.date === p.date) return true;
+        // deadline 跨天：date <= 今天 <= deadline，任务延续显示
+        if (t.periodType === 'day' && t.deadline && t.date <= p.date && t.deadline.substring(0,10) >= p.date) return true;
+        // 本周/本月周期任务
+        if (t.periodType === 'week' && t.periodValue === wv) return true;
+        if (t.periodType === 'month' && t.periodValue === mv) return true;
+        return false;
+      });
     } else if (p.periodType === 'week') {
       const r = U.getWeekRange(p.periodValue);
-      return tasks.filter(t => (t.periodType === 'day' && t.date >= r.start && t.date <= r.end) || (t.periodType === 'week' && t.periodValue === p.periodValue));
+      return tasks.filter(t => {
+        if (t.periodType === 'week' && t.periodValue === p.periodValue) return true;
+        if (t.periodType === 'day') {
+          // 任务创建或 deadline 在本周范围内
+          if (t.date >= r.start && t.date <= r.end) return true;
+          if (t.deadline && t.deadline.substring(0,10) >= r.start && t.date <= r.end) return true;
+        }
+        return false;
+      });
     } else {
-      return tasks.filter(t => (t.periodType === 'day' && t.date && t.date.startsWith(p.periodValue)) || (t.periodType === 'month' && t.periodValue === p.periodValue));
+      const mp = p.periodValue;
+      return tasks.filter(t => {
+        if (t.periodType === 'month' && t.periodValue === mp) return true;
+        if (t.periodType === 'day') {
+          if (t.date && t.date.startsWith(mp)) return true;
+          if (t.deadline && t.deadline.substring(0,7) === mp) return true;
+        }
+        return false;
+      });
     }
   },
 
