@@ -328,184 +328,39 @@ a { color: var(--color-today); text-decoration: none; }
 
 <script>
 // ==================== 全局配置 ====================
-const SUPABASE_URL = 'https://jnqelmphbbffjnnyanjv.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpucWVsbXBoYmJmZmpubnlhbmp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjM2MzYsImV4cCI6MjA5NjU5OTYzNn0.UfW7rSWHUFMMXkkc8nOqvFsi1FuTaMvQs8qCwCs9nCE';
-const SYNC_KEY = 'todolist_sync';
 const LOCAL_KEY = 'todolist_local';
-let supabase = null;
-
-// 异步加载 supabase-js（不阻塞页面渲染）
-function loadSupabaseJS() {
-  return new Promise((resolve) => {
-    if (typeof supabase !== 'undefined' && supabase.createClient) { resolve(true); return; }
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => { console.warn('Supabase JS load failed, realtime disabled'); resolve(false); };
-    document.head.appendChild(script);
-  });
-}
 
 // ==================== 工具函数 ====================
 const U = {
-  fmtDate(d) { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; },
-  fmtLabel(ds) { const t=U.fmtDate(new Date()); if(ds===t)return'今天'; const d=new Date(ds+'T00:00:00'); return `${d.getMonth()+1}月${d.getDate()}日`; },
-  getWeekVal(ds) { const d=new Date(ds+'T00:00:00'),dn=d.getDay()||7; d.setDate(d.getDate()+4-dn); const ys=new Date(d.getFullYear(),0,1); const wn=Math.ceil(((d-ys)/86400000+1)/7); return `${d.getFullYear()}-W${String(wn).padStart(2,'0')}`; },
+  fmtDate(d) { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return y+'-'+m+'-'+day; },
+  fmtLabel(ds) { const t=U.fmtDate(new Date()); if(ds===t)return'今天'; const d=new Date(ds+'T00:00:00'); return (d.getMonth()+1)+'月'+d.getDate()+'日'; },
+  getWeekVal(ds) { const d=new Date(ds+'T00:00:00'),dn=d.getDay()||7; d.setDate(d.getDate()+4-dn); const ys=new Date(d.getFullYear(),0,1); const wn=Math.ceil(((d-ys)/86400000+1)/7); return d.getFullYear()+'-W'+String(wn).padStart(2,'0'); },
   getWeekRange(wv) { const[y,w]=wv.split('-W').map(Number),j4=new Date(y,0,4),j4d=j4.getDay()||7,m=new Date(j4); m.setDate(j4.getDate()-j4d+1+(w-1)*7); const s=new Date(m); s.setDate(m.getDate()+6); return{start:U.fmtDate(m),end:U.fmtDate(s)}; },
   esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; },
-  hl(t,k) { if(!k)return U.esc(t); const e=U.esc(t),ek=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return e.replace(new RegExp(`(${ek})`,'gi'),'<span class="search-highlight">$1</span>'); },
+  hl(t,k) { if(!k)return U.esc(t); const e=U.esc(t),ek=k.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&'); return e.replace(new RegExp('('+ek+')','gi'),'<span class=\"search-highlight\">$1</span>'); },
   WDAYS: ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'],
   MONTHS: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
   WD: ['一','二','三','四','五','六','日']
-};
-
-// ==================== 云端同步（Supabase） ====================
-const Cloud = {
-  _realtimeChannel: null,
-
-  _client: null,
-  async init() {
-    await loadSupabaseJS();
-    if (typeof supabase !== 'undefined' && supabase.createClient) {
-      this._client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-    }
-  },
-
-  _headers() {
-    return { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-  },
-
-  startRealtime() {
-    if (!this._client || !Auth.isSync()) return;
-    this.stopRealtime();
-    const code = Auth.getSyncCode();
-    const filter = `sync_code=eq.${code}`;
-    this._realtimeChannel = this._client
-      .channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter }, (payload) => {
-        const t = payload.new || payload.old;
-        if (!t) return;
-        const localId = t.local_id || String(t.id);
-        if (payload.eventType === 'DELETE') {
-          Storage.delete(localId);
-        } else if (payload.eventType === 'INSERT') {
-          Storage.add({ id: t.local_id || t.id, title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, createdAt: t.created_at, updatedAt: t.updated_at });
-        } else if (payload.eventType === 'UPDATE') {
-          Storage.update(localId, { title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, updatedAt: t.updated_at });
-        }
-        if (!Search.active) { TaskList.load(); Calendar.refresh(); }
-        document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
-        document.getElementById('syncStatus').classList.remove('offline');
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
-          document.getElementById('syncStatus').classList.remove('offline');
-          document.getElementById('syncStatus').style.display = '';
-        }
-      });
-  },
-
-  stopRealtime() {
-    if (this._realtimeChannel) {
-      this._client.removeChannel(this._realtimeChannel);
-      this._realtimeChannel = null;
-    }
-  },
-
-  async syncDown() {
-    if (!Auth.isSync()) return;
-    const code = Auth.getSyncCode();
-    let query = `${SUPABASE_URL}/rest/v1/tasks?sync_code=eq.${code}&order=created_at`;
-    const res = await fetch(query, { headers: this._headers() });
-    if (!res.ok) return;
-    const cloud = await res.json();
-    if (!cloud.length) return;
-    // 合并：云端覆盖本地
-    const map = new Map();
-    Storage.getAll().forEach(t => map.set(t.local_id||t.id, t));
-    cloud.forEach(t => {
-      const lid = t.local_id || String(t.id);
-      const exist = map.get(lid);
-      if (!exist || new Date(t.updated_at) > new Date(exist.updatedAt||exist.createdAt)) {
-        map.set(lid, { id: t.local_id||t.id, title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, createdAt: t.created_at, updatedAt: t.updated_at });
-      }
-    });
-    Storage.saveAll([...map.values()]);
-  },
-
-  async syncUp() {
-    if (!Auth.isSync()) return;
-    const syncCode = Auth.getSyncCode();
-    const tasks = Storage.getAll();
-    // 批量上传：逐个插入
-    for (const t of tasks) {
-      const body = {
-        sync_code: syncCode,
-        title: t.title,
-        date: t.date,
-        period_type: t.periodType,
-        period_value: t.periodValue,
-        deadline: t.deadline,
-        completed: t.completed || 0,
-        notified: t.notified || false,
-        local_id: String(t.id)
-      };
-      // 先尝试找已有记录
-      const check = await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${t.id}&select=id`, { headers: this._headers() });
-      if (check.ok) {
-        const rows = await check.json();
-        if (rows.length) {
-          await fetch(`${SUPABASE_URL}/rest/v1/tasks?id=eq.${rows[0].id}`, { method: 'PATCH', headers: this._headers(), body: JSON.stringify(body) });
-          continue;
-        }
-      }
-      await fetch(`${SUPABASE_URL}/rest/v1/tasks`, { method: 'POST', headers: this._headers(), body: JSON.stringify(body) });
-    }
-  },
-
-  async fullSync() {
-    try {
-      await this.syncDown();
-      await this.syncUp();
-      document.getElementById('syncStatus').classList.remove('offline');
-      document.getElementById('syncStatus').textContent = '☁️ 已同步';
-      document.getElementById('syncStatus').style.display = '';
-      return true;
-    } catch(e) { return false; }
-  },
-
-  async deleteRemote(localId) {
-    if (!Auth.isSync()) return;
-    await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${localId}`, { method: 'DELETE', headers: this._headers() });
-  },
-
-  generateCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i=0;i<6;i++) code += chars[Math.floor(Math.random()*chars.length)];
-    return code;
-  }
 };
 
 // ==================== 本地存储 ====================
 const Storage = {
   getAll() { try { const r = localStorage.getItem(LOCAL_KEY); return r ? JSON.parse(r) : []; } catch { return []; } },
   saveAll(tasks) { localStorage.setItem(LOCAL_KEY, JSON.stringify(tasks)); },
-  add(task) { const tasks = this.getAll(); task.id = Date.now(); task.createdAt = new Date().toISOString(); task.updatedAt = task.createdAt; tasks.push(task); this.saveAll(tasks); return task; },
+  add(task) { const tasks = this.getAll(); task.id = Date.now(); task.createdAt = new Date().toISOString(); tasks.push(task); this.saveAll(tasks); return task; },
   delete(id) { this.saveAll(this.getAll().filter(t => t.id !== id)); },
   update(id, updates) { const tasks = this.getAll(); const idx = tasks.findIndex(t => t.id === id); if (idx >= 0) { Object.assign(tasks[idx], updates); tasks[idx].updatedAt = new Date().toISOString(); this.saveAll(tasks); } },
 
-  getFiltered({ periodType, date, periodValue }) {
+  getFiltered(p) {
     const tasks = this.getAll();
-    if (periodType === 'day') {
-      const wv = U.getWeekVal(date), mv = date.substring(0,7);
-      return tasks.filter(t => t.date === date || (t.periodType === 'week' && t.periodValue === wv) || (t.periodType === 'month' && t.periodValue === mv));
-    } else if (periodType === 'week') {
-      const {start, end} = U.getWeekRange(periodValue);
-      return tasks.filter(t => (t.periodType === 'day' && t.date >= start && t.date <= end) || (t.periodType === 'week' && t.periodValue === periodValue));
+    if (p.periodType === 'day') {
+      const wv = U.getWeekVal(p.date), mv = p.date.substring(0,7);
+      return tasks.filter(t => t.date === p.date || (t.periodType === 'week' && t.periodValue === wv) || (t.periodType === 'month' && t.periodValue === mv));
+    } else if (p.periodType === 'week') {
+      const r = U.getWeekRange(p.periodValue);
+      return tasks.filter(t => (t.periodType === 'day' && t.date >= r.start && t.date <= r.end) || (t.periodType === 'week' && t.periodValue === p.periodValue));
     } else {
-      return tasks.filter(t => (t.periodType === 'day' && t.date && t.date.startsWith(periodValue)) || (t.periodType === 'month' && t.periodValue === periodValue));
+      return tasks.filter(t => (t.periodType === 'day' && t.date && t.date.startsWith(p.periodValue)) || (t.periodType === 'month' && t.periodValue === p.periodValue));
     }
   },
 
@@ -515,7 +370,7 @@ const Storage = {
   },
 
   getDates(year, month) {
-    const prefix = `${year}-${String(month).padStart(2,'0')}`;
+    const prefix = year+'-'+String(month).padStart(2,'0');
     const s = new Set();
     this.getAll().forEach(t => { if (t.date && t.date.startsWith(prefix)) s.add(t.date); });
     return [...s];
@@ -532,11 +387,11 @@ const Calendar = {
     const fd=new Date(this.y,this.m-1,1), dim=new Date(this.y,this.m,0).getDate();
     let sd=fd.getDay(); sd=sd===0?6:sd-1;
     const tc=Math.ceil((sd+dim)/7)*7;
-    let h=`<div class="cal-header"><button class="cal-nav" data-a="prev">◀</button><span class="cal-title">${this.y}年${U.MONTHS[this.m-1]}</span><button class="cal-nav" data-a="next">▶</button></div><div class="cal-weekdays">${U.WD.map(d=>`<span>${d}</span>`).join('')}</div><div class="cal-grid">`;
+    let h='<div class=\"cal-header\"><button class=\"cal-nav\" data-a=\"prev\">◀</button><span class=\"cal-title\">'+this.y+'年'+U.MONTHS[this.m-1]+'</span><button class=\"cal-nav\" data-a=\"next\">▶</button></div><div class=\"cal-weekdays\">'+U.WD.map(d=>'<span>'+d+'</span>').join('')+'</div><div class=\"cal-grid\">';
     for(let i=0;i<tc;i++) {
-      const dn=i-sd+1, v=dn>=1&&dn<=dim, ds=v?`${this.y}-${String(this.m).padStart(2,'0')}-${String(dn).padStart(2,'0')}`:'';
+      const dn=i-sd+1, v=dn>=1&&dn<=dim, ds=v?this.y+'-'+String(this.m).padStart(2,'0')+'-'+String(dn).padStart(2,'0'):'';
       let cls='cal-cell'; if(!v)cls+=' empty'; if(ds===today)cls+=' today'; if(ds===this.sel)cls+=' selected';
-      h+=`<div class="${cls}" data-d="${ds}"><span class="cal-day">${v?dn:''}</span>${v&&td.includes(ds)?'<span class="cal-dot"></span>':''}</div>`;
+      h+='<div class=\"'+cls+'\" data-d=\"'+ds+'\"><span class=\"cal-day\">'+(v?dn:'')+'</span>'+(v&&td.includes(ds)?'<span class=\"cal-dot\"></span>':'')+'</div>';
     }
     h+='</div>'; c.innerHTML=h;
     c.querySelectorAll('.cal-nav').forEach(b => b.addEventListener('click',()=>{
@@ -569,18 +424,18 @@ const TaskList = {
   load() { this.searchMode=false; this.render(Storage.getFiltered(this.getParams())); },
   render(tasks) {
     const c=document.getElementById('taskList'); if(!c)return;
-    if(!tasks.length) { c.innerHTML='<div class="empty-state"><span class="icon">📝</span><p>暂无任务，添加一个吧</p></div>'; }
+    if(!tasks.length) { c.innerHTML='<div class=\"empty-state\"><span class=\"icon\">📝</span><p>暂无任务，添加一个吧</p></div>'; }
     else {
       const dT=tasks.filter(t=>t.periodType==='day'||(!t.periodType&&t.date));
       const wT=tasks.filter(t=>t.periodType==='week');
       const mT=tasks.filter(t=>t.periodType==='month');
       let h='';
-      if(dT.length)h+='<div class="period-divider">📅 日期任务</div>'+dT.map(t=>this.itemHtml(t)).join('');
-      if(wT.length)h+='<div class="period-divider">📋 本周任务</div>'+wT.map(t=>this.itemHtml(t)).join('');
-      if(mT.length)h+='<div class="period-divider">📆 本月任务</div>'+mT.map(t=>this.itemHtml(t)).join('');
+      if(dT.length)h+='<div class=\"period-divider\">📅 日期任务</div>'+dT.map(t=>TaskList.itemHtml(t)).join('');
+      if(wT.length)h+='<div class=\"period-divider\">📋 本周任务</div>'+wT.map(t=>TaskList.itemHtml(t)).join('');
+      if(mT.length)h+='<div class=\"period-divider\">📆 本月任务</div>'+mT.map(t=>TaskList.itemHtml(t)).join('');
       c.innerHTML=h;
     }
-    this.bindEvents(); this.updateStatus(tasks);
+    TaskList.bindEvents(); TaskList.updateStatus(tasks);
   },
   itemHtml(t) {
     const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
@@ -588,30 +443,30 @@ const TaskList = {
     if(t.deadline) {
       const now=new Date(), dd=new Date(t.deadline), diff=dd-now;
       if(t.completed) { dl='✅ 已完成'; dlCls='deadline-done'; }
-      else if(diff<0) { const h=Math.abs(Math.round(diff/3600000)); dl=`🔥 已过期${h}h`; dlCls='deadline-over'; }
-      else if(diff<6*3600000) { const h=Math.round(diff/3600000); dl=`⚡ 还剩${h}h`; dlCls='deadline-near'; }
-      else { const d=Math.ceil(diff/86400000); dl=`⏰ 还剩${d}天`; dlCls='deadline-ok'; }
+      else if(diff<0) { const h=Math.abs(Math.round(diff/3600000)); dl='🔥 已过期'+h+'h'; dlCls='deadline-over'; }
+      else if(diff<6*3600000) { const h=Math.round(diff/3600000); dl='⚡ 还剩'+h+'h'; dlCls='deadline-near'; }
+      else { const d=Math.ceil(diff/86400000); dl='⏰ 还剩'+d+'天'; dlCls='deadline-ok'; }
     }
     let tg='';
-    if((t.periodType==='day'||!t.periodType)&&t.date) tg=`<span class="task-tag today">${U.fmtLabel(t.date)}</span>`;
-    else if(t.periodType==='week') tg='<span class="task-tag week">本周</span>';
-    else if(t.periodType==='month') tg='<span class="task-tag month">本月</span>';
-    const dlTag=dl?`<span class="task-tag ${dlCls}">${dl}</span>`:'';
+    if((t.periodType==='day'||!t.periodType)&&t.date) tg='<span class=\"task-tag today\">'+U.fmtLabel(t.date)+'</span>';
+    else if(t.periodType==='week') tg='<span class=\"task-tag week\">本周</span>';
+    else if(t.periodType==='month') tg='<span class=\"task-tag month\">本月</span>';
+    const dlTag=dl?'<span class=\"task-tag '+dlCls+'\">'+dl+'</span>':'';
     let cls='task-item '+done;
     if(dlCls==='deadline-over'&&!t.completed) cls+=' overdue';
     else if(dlCls==='deadline-near'&&!t.completed) cls+=' urgent';
-    return `<div class="${cls}" data-id="${t.id}"><button class="${cc}" data-action="toggle" data-id="${t.id}"></button><div class="task-body"><div class="task-title">${U.esc(t.title)}</div><div class="task-meta">${tg}${dlTag}</div></div></div>`;
+    return '<div class=\"'+cls+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\"></button><div class=\"task-body\"><div class=\"task-title\">'+U.esc(t.title)+'</div><div class=\"task-meta\">'+tg+dlTag+'</div></div></div>';
   },
   bindEvents() {
     document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(){
       const id=Number(this.dataset.id), item=this.closest('.task-item'); if(!item)return;
       item.classList.add('removing');
-      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); if(Auth.isSync())Cloud.syncUp(); },{once:true});
+      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); },{once:true});
     }));
   },
   updateStatus(tasks) {
     const tot=tasks.length, comp=tasks.filter(t=>t.completed).length;
-    document.getElementById('statusText').textContent=`共 ${tot} 个任务 · 已完成 ${comp} 个`;
+    document.getElementById('statusText').textContent='共 '+tot+' 个任务 · 已完成 '+comp+' 个';
   },
   add() {
     const inp=document.getElementById('taskInput'), title=inp.value.trim(); if(!title)return;
@@ -619,25 +474,21 @@ const TaskList = {
     let date=null,pv=null,deadline=null;
     if(pt==='day')date=this.date; else if(pt==='week')pv=U.getWeekVal(this.date); else if(pt==='month')pv=this.date.substring(0,7);
     const dd=document.getElementById('deadlineDate').value, dt=document.getElementById('deadlineTime').value;
-    if(dd) deadline=dt?`${dd}T${dt}:00`:`${dd}T23:59:00`;
+    if(dd) deadline=dt?dd+'T'+dt+':00':dd+'T23:59:00';
     Storage.add({title,date,periodType:pt,periodValue:pv,deadline,completed:0,notified:false});
     inp.value='';
     this.load(); Calendar.refresh();
-    if(Auth.isSync()) Cloud.syncUp().then(()=>{
-      document.getElementById('syncStatus').textContent='☁️ 已同步';
-      document.getElementById('syncStatus').classList.remove('offline');
-    });
   },
   renderSearch(tasks, kw) {
     this.searchMode=true;
     const c=document.getElementById('taskList'); if(!c)return;
-    if(!tasks.length) { c.innerHTML=`<div class="empty-state"><span class="icon">🔍</span><p>未找到包含"${U.esc(kw)}"的任务</p></div>`; this.updateStatus([]); return; }
-    let h=`<div class="search-results-header">搜索 "<strong>${U.esc(kw)}</strong>" — 找到 ${tasks.length} 个结果</div>`;
+    if(!tasks.length) { c.innerHTML='<div class=\"empty-state\"><span class=\"icon\">🔍</span><p>未找到包含\"'+U.esc(kw)+'\"的任务</p></div>'; this.updateStatus([]); return; }
+    let h='<div class=\"search-results-header\">搜索 \"<strong>'+U.esc(kw)+'</strong>\" — 找到 '+tasks.length+' 个结果</div>';
     tasks.forEach(t=>{
       const done=t.completed?'done':'', cc=t.completed?'task-circle done':'task-circle';
       let lt=''; if((t.periodType==='day'||!t.periodType)&&t.date)lt=U.fmtLabel(t.date); else if(t.periodType==='week')lt='本周'; else if(t.periodType==='month')lt='本月';
       const dot=t.completed?'#bdbdbd':'#64b5f6';
-      h+=`<div class="task-item ${done}" data-id="${t.id}"><button class="${cc}" data-action="toggle" data-id="${t.id}"></button><span class="task-title">${U.hl(t.title,kw)}</span><span class="search-location">${lt}</span><span style="width:8px;height:8px;border-radius:50%;background:${dot};flex-shrink:0;"></span></div>`;
+      h+='<div class=\"task-item '+done+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\"></button><span class=\"task-title\">'+U.hl(t.title,kw)+'</span><span class=\"search-location\">'+lt+'</span><span style=\"width:8px;height:8px;border-radius:50%;background:'+dot+';flex-shrink:0;\"></span></div>';
     });
     c.innerHTML=h; this.bindEvents(); this.updateStatus(tasks);
   }
@@ -660,69 +511,39 @@ const Search = {
   clear() { this.active=false; App.setSearchUI(false); TaskList.load(); App.updateHeader(); }
 };
 
-// ==================== 同步码管理 ====================
-const Auth = {
-  getSyncCode() { return localStorage.getItem(SYNC_KEY+'_code') || ''; },
-  setSyncCode(c) { localStorage.setItem(SYNC_KEY+'_code', c); },
-  isSync() { return !!this.getSyncCode(); }
-};
-
 // ==================== 通知 ====================
 const Notif = {
   enabled: false,
-
   async request() {
     if (!('Notification' in window)) return false;
     if (Notification.permission === 'granted') { this.enabled = true; return true; }
     const r = await Notification.requestPermission();
     this.enabled = r === 'granted';
-    if (this.enabled) this.show('toDoliSt', '通知已开启！任务快到期时你会收到提醒。');
+    if (this.enabled) this.show('toDoliSt', '通知已开启！');
     return this.enabled;
   },
-
-  show(title, body) {
-    if (!this.enabled) return;
-    try { new Notification(title, { body, icon: '🌰', badge: '🌰' }); } catch(e) {}
-  },
-
+  show(title, body) { if (!this.enabled) return; try { new Notification(title, { body, icon: '🌰' }); } catch(e) {} },
   checkDeadlines() {
     if (!this.enabled) return;
-    const tasks = Storage.getAll();
-    const now = new Date();
-    tasks.forEach(t => {
+    Storage.getAll().forEach(t => {
       if (t.deadline && !t.completed && !t.notified) {
-        const dd = new Date(t.deadline), diff = dd - now;
+        const dd = new Date(t.deadline), diff = dd - new Date();
         if (diff > 0 && diff < 6 * 3600000) {
-          this.show('⏰ 任务提醒', `「${t.title}」将在 ${Math.round(diff/3600000)} 小时后截止`);
+          this.show('⏰ 任务提醒', '「'+t.title+'」将在 '+Math.round(diff/3600000)+' 小时后截止');
           Storage.update(t.id, { notified: true });
         }
       }
     });
   },
-
-  start() {
-    this.checkDeadlines();
-    setInterval(() => this.checkDeadlines(), 10 * 60 * 1000); // 每10分钟检查
-  }
+  start() { this.checkDeadlines(); setInterval(() => this.checkDeadlines(), 10 * 60 * 1000); }
 };
 
 // ==================== PWA ====================
 function registerSW() {
   if ('serviceWorker' in navigator) {
-    // 简单的 service worker 注册
-    const swCode = `
-self.addEventListener('install', e => self.skipWaiting());
-self.addEventListener('activate', e => e.waitUntil(clients.claim()));
-self.addEventListener('notificationclick', e => {
-  e.notification.close();
-  e.waitUntil(clients.matchAll({type:'window'}).then(cs => {
-    if(cs.length) cs[0].focus();
-    else clients.openWindow('/');
-  }));
-});
-    `;
+    const swCode = 'self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(clients.claim()));';
     const blob = new Blob([swCode], { type: 'application/javascript' });
-    navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(() => {});
+    navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
   }
 }
 
@@ -736,147 +557,39 @@ const App = {
     TaskList.init(); TaskList.date=this.date;
     Search.init();
     registerSW();
-
-    // 直接进入，无需登录。数据存 localStorage。
     document.getElementById('appView').style.display='';
-    document.getElementById('userBtn').textContent = '☁️ 同步 ▾';
 
-    // 如果之前绑定过同步码，后台静默同步
-    const prevSync = localStorage.getItem(SYNC_KEY+'_code');
-    if (prevSync) {
-      await Cloud.init();
-      const ok = await Cloud.fullSync();
-      document.getElementById('syncStatus').style.display='';
-      if (ok) {
-        document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
-        document.getElementById('syncStatus').classList.remove('offline');
-        Cloud.startRealtime();
-      } else {
-        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
-        document.getElementById('syncStatus').classList.add('offline');
-      }
-    }
-
-    // 视图切换
     document.querySelectorAll('.view-tab').forEach(tab => tab.addEventListener('click',()=>this.switchView(tab.dataset.view)));
     document.getElementById('navPrev').addEventListener('click',()=>this.nav(-1));
     document.getElementById('navNext').addEventListener('click',()=>this.nav(1));
     document.getElementById('todayBtn').addEventListener('click',()=>this.goToday());
 
-    // 周期选择
     document.querySelectorAll('.period-option').forEach(b => b.addEventListener('click',()=>{
       document.querySelectorAll('.period-option').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     }));
 
-    // 用户菜单
     document.getElementById('userBtn').addEventListener('click',()=>{
-      document.getElementById('userDropdown').classList.toggle('show');
-    });
-    document.getElementById('dropSync').addEventListener('click',()=>{
-      document.getElementById('userDropdown').classList.remove('show');
-      this.showSyncDialog();
-    });
-    document.getElementById('dropNotif').addEventListener('click',()=>{
-      document.getElementById('userDropdown').classList.remove('show');
       Notif.request().then(ok => {
         document.getElementById('notifStatus').style.display = ok ? '' : 'none';
         document.getElementById('notifStatus').textContent = ok ? '🔔 通知已开启' : '';
         if (ok) Notif.start();
       });
     });
-    document.addEventListener('click',e=>{
-      if(!e.target.closest('#userBtn')&&!e.target.closest('#userDropdown'))
-        document.getElementById('userDropdown').classList.remove('show');
-    });
 
-    // 手机日历
     document.getElementById('mobileCalToggle').addEventListener('click',()=>{
       document.getElementById('sidebar').classList.toggle('open');
     });
 
-    // 初始加载
     this.updateHeader();
     TaskList.load();
-    document.getElementById('appView').style.display='';
 
-    // 通知
-    const notifOk = localStorage.getItem(SYNC_KEY+'_notif');
-    if (notifOk === 'true') Notif.enabled = true;
-    if (Notification.permission === 'granted') { Notif.enabled = true; }
-    if (Notif.enabled) {
-      document.getElementById('notifStatus').style.display = '';
-      document.getElementById('notifStatus').textContent = '🔔 通知已开启';
-      Notif.start();
-    }
-  },
-
-  showSyncDialog() {
-    const overlay = document.getElementById('authOverlay');
-    overlay.style.display = 'flex';
-    const d = document.getElementById('authDialog');
-    const code = localStorage.getItem(SYNC_KEY+'_code') || '';
-    d.innerHTML = `
-      <h2>🌰 多设备同步</h2>
-      <div class="subtitle">在另一设备输入相同同步码即可同步</div>
-      <div class="error-msg" id="authError"></div>
-      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" value="${code}" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
-      <button class="btn btn-primary" id="syncJoin">加入同步</button>
-      <button class="btn btn-secondary" id="syncCreate">生成新同步码</button>
-      ${code ? '<div style="margin-top:10px;font-size:12px;color:var(--chestnut);">你的同步码: <strong>'+code+'</strong></div>' : ''}
-      <button class="btn btn-outline" id="syncClose" style="margin-top:8px;">关闭</button>
-    `;
-    document.getElementById('syncClose').addEventListener('click',()=>{overlay.style.display='none';});
-    document.getElementById('syncJoin').addEventListener('click', async () => {
-      const c = document.getElementById('syncCodeInput').value.trim().toUpperCase();
-      if (c.length < 4) { document.getElementById('authError').textContent = '同步码至少4位'; return; }
-      localStorage.setItem(SYNC_KEY+'_code', c);
-      overlay.style.display = 'none';
-      document.getElementById('syncStatus').style.display = '';
-      try {
-        await Cloud.init();
-        const ok = await Cloud.fullSync();
-        if (ok) {
-          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
-          document.getElementById('syncStatus').classList.remove('offline');
-          Cloud.startRealtime();
-          TaskList.load(); Calendar.refresh();
-        } else {
-          document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
-          document.getElementById('syncStatus').classList.add('offline');
-        }
-      } catch(e) {
-        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
-        document.getElementById('syncStatus').classList.add('offline');
-      }
-    });
-    document.getElementById('syncCreate').addEventListener('click', async () => {
-      const c = Cloud.generateCode();
-      document.getElementById('syncCodeInput').value = c;
-      localStorage.setItem(SYNC_KEY+'_code', c);
-      overlay.style.display = 'none';
-      document.getElementById('syncStatus').style.display = '';
-      try {
-        await Cloud.init();
-        const ok = await Cloud.fullSync();
-        if (ok) {
-          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
-          document.getElementById('syncStatus').classList.remove('offline');
-          Cloud.startRealtime();
-        } else {
-          document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
-          document.getElementById('syncStatus').classList.add('offline');
-        }
-      } catch(e) {
-        document.getElementById('syncStatus').textContent = '⚠️ 同步失败';
-        document.getElementById('syncStatus').classList.add('offline');
-      }
-    });
+    if (Notification.permission === 'granted') { Notif.enabled = true; Notif.start(); }
   },
 
   switchView(v) {
     this.view=v;
     document.querySelectorAll('.view-tab').forEach(t=>t.classList.remove('active'));
-    document.querySelector(`.view-tab[data-view="${v}"]`).classList.add('active');
+    document.querySelector('.view-tab[data-view="'+v+'"]').classList.add('active');
     this.updateHeader(); Calendar.goTo(this.date);
     TaskList.view=v; TaskList.date=this.date; TaskList.load();
   },
@@ -906,13 +619,13 @@ const App = {
     const d=new Date(this.date+'T00:00:00'), today=U.fmtDate(new Date());
     const hd=document.getElementById('headerDate'), hs=document.getElementById('headerSub');
     if(this.view==='day'){
-      hd.textContent=`${d.getMonth()+1}月${d.getDate()}日 ${U.WDAYS[d.getDay()]}`;
+      hd.textContent=(d.getMonth()+1)+'月'+d.getDate()+'日 '+U.WDAYS[d.getDay()];
       hs.textContent=this.date===today?'今天':'';
     }else if(this.view==='week'){
-      const wv=U.getWeekVal(this.date),{start,end}=U.getWeekRange(wv);
-      hd.textContent=`${start} — ${end}`; hs.textContent=wv;
+      const wv=U.getWeekVal(this.date),r=U.getWeekRange(wv);
+      hd.textContent=r.start+' — '+r.end; hs.textContent=wv;
     }else{
-      hd.textContent=`${d.getFullYear()}年${d.getMonth()+1}月`; hs.textContent='';
+      hd.textContent=d.getFullYear()+'年'+(d.getMonth()+1)+'月'; hs.textContent='';
     }
   },
 
