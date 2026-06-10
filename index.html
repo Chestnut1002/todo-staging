@@ -131,8 +131,34 @@ a { color: var(--color-today); text-decoration: none; }
 .task-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--white); border-radius: var(--radius-md); margin-bottom: 5px; transition: 0.2s; border: 1px solid transparent; position: relative; }
 .task-item:hover { border-color: var(--border-color); box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
 .task-item.removing { animation: fadeOut 350ms ease-out forwards; }
-.task-item.urgent { border-left: 3px solid var(--warning); }
-.task-item.overdue { border-left: 3px solid var(--danger); }
+.task-item.overdue { box-shadow: inset 0 0 0 1px rgba(200,160,160,0.18), 0 2px 6px rgba(0,0,0,0.05); }
+
+/* 优先级边框 */
+.task-item.pri-high { border-left: 3px solid #e4b8b8; }
+.task-item.pri-medium { border-left: 3px solid #e4d4a8; }
+.task-item.pri-low { border-left: 3px solid #c0d0e8; }
+
+/* 剩余时间级别 */
+.pri-high.lvl1 { border-left-color: #ecd0d0; }
+.pri-high.lvl2 { border-left-color: #e4b8b8; }
+.pri-high.lvl3 { border-left-color: #dca0a0; }
+.pri-high.lvl4 { border-left-color: #d48888; }
+
+.pri-medium.lvl1 { border-left-color: #ece0c0; }
+.pri-medium.lvl2 { border-left-color: #e4d4a8; }
+.pri-medium.lvl3 { border-left-color: #dcc890; }
+.pri-medium.lvl4 { border-left-color: #d4bc78; }
+
+.pri-low.lvl1 { border-left-color: #d4e0f0; }
+.pri-low.lvl2 { border-left-color: #c0d0e8; }
+.pri-low.lvl3 { border-left-color: #acc0e0; }
+.pri-low.lvl4 { border-left-color: #98b0d8; }
+
+/* 优先级选择器 */
+.priority-row { display: flex; align-items: center; gap: 2px; }
+.pri-opt { padding: 3px 7px; border-radius: var(--radius-sm); font-size: 10px; color: var(--text-secondary); background: var(--bg-main); transition: 0.15s; white-space: nowrap; }
+.pri-opt:hover { background: var(--border-color); }
+.pri-opt.active { background: var(--chestnut); color: var(--white); }
 
 @keyframes fadeOut {
   from { opacity: 1; transform: translateX(0) scale(1); }
@@ -295,6 +321,7 @@ a { color: var(--color-today); text-decoration: none; }
   .status-bar { height: 22px; padding: 0 8px; font-size: 10px; overflow-x: auto; white-space: nowrap; }
   .stats-divider { margin: 0 2px; }
   .period-divider { font-size: 10px; margin: 10px 0 6px; }
+  .pri-opt { padding: 2px 5px; font-size: 9px; }
   .progress-bar { height: 3px; max-width: 100px; }
   .progress-num { font-size: 10px; }
 }
@@ -360,6 +387,13 @@ a { color: var(--color-today); text-decoration: none; }
           <span class="time-label">截止</span>
           <input type="date" id="deadlineDate" title="截止日期" />
           <input type="time" id="deadlineTime" title="截止时间" />
+        </div>
+        <div class="priority-row">
+          <span class="time-label">优先级</span>
+          <button class="pri-opt" data-pri="high">🔴 重要</button>
+          <button class="pri-opt" data-pri="medium">🟡 一般</button>
+          <button class="pri-opt" data-pri="low">🔵 不强制</button>
+          <button class="pri-opt active" data-pri="">无</button>
         </div>
         <button class="add-btn" id="addBtn">＋</button>
       </div>
@@ -559,6 +593,13 @@ const TaskList = {
     if(!tasks.length) { c.innerHTML='<div class=\"empty-state\"><span class=\"icon\">📝</span><p>暂无任务，添加一个吧</p></div>'; }
     else {
       const dT=tasks.filter(t=>t.periodType==='day'||(!t.periodType&&t.date));
+      // 按优先级排序：重要 > 一般 > 不强制 > 未选；同优先级按剩余%升序
+      const priOrder = {high:0, medium:1, low:2};
+      dT.sort((a,b)=>{
+        const pa = priOrder[a.priority] ?? 3, pb = priOrder[b.priority] ?? 3;
+        if(pa!==pb) return pa-pb;
+        return TaskList.calcRemainingPct(a) - TaskList.calcRemainingPct(b);
+      });
       const wT=tasks.filter(t=>t.periodType==='week');
       const mT=tasks.filter(t=>t.periodType==='month');
       let h='';
@@ -588,8 +629,24 @@ const TaskList = {
     const dlTag=dl?'<span class=\"task-tag '+dlCls+'\">'+dl+'</span>':'';
     let cls='task-item '+ (t.completed?'done':'');
     if(dlCls==='deadline-over'&&!t.completed) cls+=' overdue';
-    else if(dlCls==='deadline-near'&&!t.completed) cls+=' urgent';
+    // 优先级 + 剩余时间级别
+    if(t.priority&&!t.completed) {
+      const pct = TaskList.calcRemainingPct(t);
+      let lvl = 'lvl1';
+      if(pct<10) lvl='lvl4'; else if(pct<40) lvl='lvl3'; else if(pct<70) lvl='lvl2';
+      cls+=' pri-'+t.priority+' '+lvl;
+    }
     return '<div class=\"'+cls+'\" data-id=\"'+t.id+'\"><button class=\"'+cc+'\" data-action=\"toggle\" data-id=\"'+t.id+'\">'+emoji+'</button><div class=\"task-body\"><div class=\"task-title\">'+U.esc(t.title)+'</div><div class=\"task-meta\">'+tg+dlTag+'</div></div></div>';
+  },
+  calcRemainingPct(t) {
+    if(!t.deadline) return 100;
+    const start = t.startDate ? new Date(t.startDate) : (t.date ? new Date(t.date+'T00:00:00') : new Date(t.createdAt||Date.now()));
+    const end = new Date(t.deadline);
+    const now = new Date();
+    const total = end - start;
+    if(total<=0) return 0;
+    const remaining = end - now;
+    return Math.max(0, Math.min(100, Math.round(remaining/total*100)));
   },
   bindEvents() {
     document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(e){
@@ -631,7 +688,9 @@ const TaskList = {
     let startDate=null;
     if(sd) startDate=st?sd+'T'+st+':00':sd+'T00:00:00';
     if(startDate) date=sd; // 有开始时间时，date 设为开始日期
-    Storage.add({title,date,periodType:pt,periodValue:pv,deadline,startDate,completed:0,notified:false});
+    const priBtn = document.querySelector('.pri-opt.active');
+    const priority = priBtn ? (priBtn.dataset.pri || '') : '';
+    Storage.add({title,date,periodType:pt,periodValue:pv,deadline,startDate,priority,completed:0,notified:false});
     inp.value='';
     this.load(); Calendar.refresh();
   },
@@ -722,6 +781,9 @@ const App = {
 
     document.querySelectorAll('.period-option').forEach(b => b.addEventListener('click',()=>{
       document.querySelectorAll('.period-option').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    }));
+    document.querySelectorAll('.pri-opt').forEach(b => b.addEventListener('click',()=>{
+      document.querySelectorAll('.pri-opt').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     }));
 
     document.getElementById('notifBtn').addEventListener('click',async ()=>{
