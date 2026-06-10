@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>toDoliSt</title>
 
-<!-- Supabase JS -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <!-- PWA manifest -->
 <link rel="manifest" href="data:application/json,{}">
 <meta name="theme-color" content="#64b5f6">
@@ -338,6 +336,18 @@ const SYNC_KEY = 'todolist_sync';
 const LOCAL_KEY = 'todolist_local';
 let supabase = null;
 
+// 异步加载 supabase-js（不阻塞页面渲染）
+function loadSupabaseJS() {
+  return new Promise((resolve) => {
+    if (typeof supabase !== 'undefined' && supabase.createClient) { resolve(true); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => { console.warn('Supabase JS load failed, realtime disabled'); resolve(false); };
+    document.head.appendChild(script);
+  });
+}
+
 // ==================== 工具函数 ====================
 const U = {
   fmtDate(d) { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; },
@@ -355,7 +365,9 @@ const U = {
 const Cloud = {
   _realtimeChannel: null,
 
-  init() {
+  _client: null,
+  async init() {
+    await loadSupabaseJS();
     if (typeof supabase !== 'undefined' && supabase.createClient) {
       this._client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
     }
