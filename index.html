@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<meta name="format-detection" content="telephone=no">
 <title>toDoliSt</title>
 
 <!-- PWA manifest -->
@@ -220,9 +222,10 @@ a { color: var(--color-today); text-decoration: none; }
 .cal-nav { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 10px; transition: 0.15s; }
 .cal-nav:hover { background: rgba(0,0,0,0.05); color: var(--text-primary); }
 .cal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 10px 6px; text-align: center; font-size: 10px; color: var(--text-secondary); font-weight: 500; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); padding: 0 10px; gap: 1px; }
-.cal-cell { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; position: relative; font-size: 12px; color: var(--text-primary); }
+.cal-weekdays { display: flex; padding: 0 10px 6px; font-size: 10px; color: var(--text-secondary); font-weight: 500; }
+.cal-weekdays span { flex: 1; text-align: center; }
+.cal-grid { display: flex; flex-wrap: wrap; padding: 0 10px; }
+.cal-cell { width: calc(100% / 7); height: 34px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; position: relative; font-size: 12px; color: var(--text-primary); margin-bottom: 1px; }
 .cal-cell.empty { cursor: default; }
 .cal-cell:hover:not(.empty) { background: rgba(100,181,246,0.1); }
 .cal-cell.today { background: var(--color-today); color: var(--white); font-weight: 600; }
