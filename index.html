@@ -916,8 +916,7 @@ const App = {
       localStorage.setItem(SYNC_KEY+'_code', code);
       Auth.mode = 'sync';
       localStorage.setItem(SYNC_KEY+'_mode','sync');
-        this.afterLogin();
-      } catch(e) { document.getElementById('authError').textContent = '加入失败，检查同步码'; }
+      this.afterLogin();
     });
     document.getElementById('syncCreate').addEventListener('click', () => {
       const code = Cloud.generateCode();
