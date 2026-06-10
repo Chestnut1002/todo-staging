@@ -282,13 +282,8 @@ a { color: var(--color-today); text-decoration: none; }
         <button class="view-tab" data-view="week">周</button>
         <button class="view-tab" data-view="month">月</button>
       </div>
-      <button class="user-btn" id="userBtn">登录 ▾</button>
-      <span class="sync-badge offline hidden" id="syncStatus" style="display:none;">离线</span>
+      <button class="user-btn" id="notifBtn" title="通知">🔔</button>
       <button class="mobile-cal-toggle" id="mobileCalToggle">📅</button>
-    </div>
-    <div class="dropdown" id="userDropdown">
-      <button class="dropdown-item" id="dropSync">🔗 多设备同步</button>
-      <button class="dropdown-item" id="dropNotif">🔔 通知设置</button>
     </div>
   </header>
 
@@ -568,7 +563,7 @@ const App = {
       document.querySelectorAll('.period-option').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     }));
 
-    document.getElementById('userBtn').addEventListener('click',()=>{
+    document.getElementById('notifBtn').addEventListener('click',()=>{
       Notif.request().then(ok => {
         document.getElementById('notifStatus').style.display = ok ? '' : 'none';
         document.getElementById('notifStatus').textContent = ok ? '🔔 通知已开启' : '';
