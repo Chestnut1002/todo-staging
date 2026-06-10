@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>toDoliSt</title>
 
+<!-- Supabase JS -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <!-- PWA manifest -->
 <link rel="manifest" href="data:application/json,{}">
 <meta name="theme-color" content="#64b5f6">
@@ -351,11 +353,12 @@ const U = {
 
 // ==================== 云端同步（Supabase） ====================
 const Cloud = {
+  _realtimeChannel: null,
+
   init() {
-    // 动态加载 Supabase JS（避免 CORS/模块加载问题）
-    if (window.supabaseClient) return window.supabaseClient;
-    // 使用简单的 REST fetch 而非 supabase-js CDN 以减少依赖
-    return null;
+    if (typeof supabase !== 'undefined' && supabase.createClient) {
+      this._client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    }
   },
 
   _headers() {
@@ -363,6 +366,45 @@ const Cloud = {
     const sess = Auth.getSession();
     if (sess) h['Authorization'] = `Bearer ${sess.access_token}`;
     return h;
+  },
+
+  startRealtime() {
+    if (!this._client || !Auth.loggedIn()) return;
+    this.stopRealtime();
+    const filter = Auth.mode === 'sync'
+      ? `sync_code=eq.${localStorage.getItem(SYNC_KEY+'_code')||''}`
+      : `user_id=eq.${Auth.getSession()?.user?.id||'none'}`;
+    this._realtimeChannel = this._client
+      .channel('tasks-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter }, (payload) => {
+        const t = payload.new || payload.old;
+        if (!t) return;
+        const localId = t.local_id || String(t.id);
+        if (payload.eventType === 'DELETE') {
+          Storage.delete(localId);
+        } else if (payload.eventType === 'INSERT') {
+          Storage.add({ id: t.local_id || t.id, title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, createdAt: t.created_at, updatedAt: t.updated_at });
+        } else if (payload.eventType === 'UPDATE') {
+          Storage.update(localId, { title: t.title, date: t.date, periodType: t.period_type, periodValue: t.period_value, deadline: t.deadline, completed: t.completed, notified: t.notified, updatedAt: t.updated_at });
+        }
+        if (!Search.active) { TaskList.load(); Calendar.refresh(); }
+        document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
+        document.getElementById('syncStatus').classList.remove('offline');
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          document.getElementById('syncStatus').textContent = '☁️ 实时同步中';
+          document.getElementById('syncStatus').classList.remove('offline');
+          document.getElementById('syncStatus').style.display = '';
+        }
+      });
+  },
+
+  stopRealtime() {
+    if (this._realtimeChannel) {
+      this._client.removeChannel(this._realtimeChannel);
+      this._realtimeChannel = null;
+    }
   },
 
   async syncDown() {
@@ -784,12 +826,12 @@ const App = {
 
     // 检查登录状态
     this.loggedIn = Auth.init();
+    Cloud.init();
     if (this.loggedIn) {
       await Cloud.syncDown();
+      Cloud.startRealtime();
       document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
       document.getElementById('userBtn').classList.add('logged-in');
-      document.getElementById('syncStatus').textContent = '☁️ 已同步';
-      document.getElementById('syncStatus').classList.remove('offline');
       document.getElementById('syncStatus').style.display = '';
       Notif.start();
     } else {
@@ -1014,6 +1056,10 @@ const App = {
     this.loggedIn = true;
     document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
     document.getElementById('userBtn').classList.add('logged-in');
+    // 云端同步
+    Cloud.init();
+    await Cloud.syncDown();
+    Cloud.startRealtime();
     TaskList.load(); Calendar.refresh();
     await Notif.request();
     if(Notif.enabled) { document.getElementById('notifStatus').style.display=''; document.getElementById('notifStatus').textContent='🔔 通知已开启'; Notif.start(); }
