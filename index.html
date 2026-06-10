@@ -266,7 +266,7 @@ a { color: var(--color-today); text-decoration: none; }
 </div>
 
 <!-- ===== 主界面 ===== -->
-<div id="appView" style="display:none;">
+<div id="appView">
   <header class="top-bar">
     <span class="logo">
       <span class="t">t</span><span class="l">o</span><span class="nut">🌰</span><span class="D">D</span><span class="l">o</span><span class="l">l</span><span class="i">i</span><span class="S">S</span><span class="t2">t</span>
@@ -287,10 +287,8 @@ a { color: var(--color-today); text-decoration: none; }
       <button class="mobile-cal-toggle" id="mobileCalToggle">📅</button>
     </div>
     <div class="dropdown" id="userDropdown">
-      <button class="dropdown-item" id="dropAccount">👤 账户信息</button>
-      <button class="dropdown-item" id="dropChangePwd">🔒 修改密码</button>
+      <button class="dropdown-item" id="dropSync">🔗 多设备同步</button>
       <button class="dropdown-item" id="dropNotif">🔔 通知设置</button>
-      <button class="dropdown-item danger" id="dropLogout">🚪 退出登录</button>
     </div>
   </header>
 
@@ -374,18 +372,14 @@ const Cloud = {
   },
 
   _headers() {
-    const h = { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-    const sess = Auth.getSession();
-    if (sess) h['Authorization'] = `Bearer ${sess.access_token}`;
-    return h;
+    return { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
   },
 
   startRealtime() {
-    if (!this._client || !Auth.loggedIn()) return;
+    if (!this._client || !Auth.isSync()) return;
     this.stopRealtime();
-    const filter = Auth.mode === 'sync'
-      ? `sync_code=eq.${localStorage.getItem(SYNC_KEY+'_code')||''}`
-      : `user_id=eq.${Auth.getSession()?.user?.id||'none'}`;
+    const code = Auth.getSyncCode();
+    const filter = `sync_code=eq.${code}`;
     this._realtimeChannel = this._client
       .channel('tasks-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter }, (payload) => {
@@ -420,12 +414,9 @@ const Cloud = {
   },
 
   async syncDown() {
-    if (!Auth.loggedIn()) return;
-    const sess = Auth.getSession();
-    let query = `${SUPABASE_URL}/rest/v1/tasks?select=*&order=created_at`;
-    if (sess.user) {
-      // 邮箱用户：使用 RLS 自动过滤
-    }
+    if (!Auth.isSync()) return;
+    const code = Auth.getSyncCode();
+    let query = `${SUPABASE_URL}/rest/v1/tasks?sync_code=eq.${code}&order=created_at`;
     const res = await fetch(query, { headers: this._headers() });
     if (!res.ok) return;
     const cloud = await res.json();
@@ -444,18 +435,13 @@ const Cloud = {
   },
 
   async syncUp() {
-    if (!Auth.loggedIn()) return;
-    const sess = Auth.getSession();
-    if (!sess) return;
-    // 先删再插（简化同步策略）
-    const userId = sess.user?.id;
-    const syncCode = localStorage.getItem(SYNC_KEY+'_code');
+    if (!Auth.isSync()) return;
+    const syncCode = Auth.getSyncCode();
     const tasks = Storage.getAll();
     // 批量上传：逐个插入
     for (const t of tasks) {
       const body = {
-        user_id: userId || null,
-        sync_code: syncCode || null,
+        sync_code: syncCode,
         title: t.title,
         date: t.date,
         period_type: t.periodType,
@@ -490,8 +476,8 @@ const Cloud = {
   },
 
   async deleteRemote(localId) {
-    if (!Auth.loggedIn()) return;
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${localId}`, { method: 'DELETE', headers: this._headers() });
+    if (!Auth.isSync()) return;
+    await fetch(`${SUPABASE_URL}/rest/v1/tasks?local_id=eq.${localId}`, { method: 'DELETE', headers: this._headers() });
   },
 
   generateCode() {
@@ -620,7 +606,7 @@ const TaskList = {
     document.querySelectorAll('[data-action="toggle"]').forEach(b=>b.addEventListener('click',function(){
       const id=Number(this.dataset.id), item=this.closest('.task-item'); if(!item)return;
       item.classList.add('removing');
-      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); if(App.loggedIn)Cloud.syncUp(); },{once:true});
+      item.addEventListener('animationend',()=>{ Storage.delete(id); TaskList.load(); Calendar.refresh(); if(Auth.isSync())Cloud.syncUp(); },{once:true});
     }));
   },
   updateStatus(tasks) {
@@ -637,7 +623,7 @@ const TaskList = {
     Storage.add({title,date,periodType:pt,periodValue:pv,deadline,completed:0,notified:false});
     inp.value='';
     this.load(); Calendar.refresh();
-    if(App.loggedIn) Cloud.syncUp().then(()=>{
+    if(Auth.isSync()) Cloud.syncUp().then(()=>{
       document.getElementById('syncStatus').textContent='☁️ 已同步';
       document.getElementById('syncStatus').classList.remove('offline');
     });
@@ -674,96 +660,11 @@ const Search = {
   clear() { this.active=false; App.setSearchUI(false); TaskList.load(); App.updateHeader(); }
 };
 
-// ==================== 认证（Supabase Auth） ====================
+// ==================== 同步码管理 ====================
 const Auth = {
-  mode: 'none',
-  email: '',
-  _session: null,
-
-  loggedIn() { return this.mode === 'email' || this.mode === 'sync'; },
-  getSession() { return this._session; },
-
-  init() {
-    const mode = localStorage.getItem(SYNC_KEY+'_mode');
-    const email = localStorage.getItem(SYNC_KEY+'_email');
-    const sessionStr = localStorage.getItem(SYNC_KEY+'_session');
-    if (sessionStr) {
-      try { this._session = JSON.parse(sessionStr); } catch(e) {}
-    }
-    if (mode === 'sync' || mode === 'email') {
-      this.mode = mode;
-      this.email = email || '';
-      return true;
-    }
-    return false;
-  },
-
-  async _api(method, path, body, needAuth) {
-    const headers = { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' };
-    if (needAuth && this._session) headers['Authorization'] = `Bearer ${this._session.access_token}`;
-    const res = await fetch(`${SUPABASE_URL}/auth/v1${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
-    if (!res.ok) { const t = await res.text(); throw new Error(t); }
-    return res.json();
-  },
-
-  async loginEmail(email, password) {
-    try {
-      const r = await this._api('POST', '/token?grant_type=password', { email, password });
-      this._session = r;
-      this.mode = 'email';
-      this.email = email;
-      localStorage.setItem(SYNC_KEY+'_mode', 'email');
-      localStorage.setItem(SYNC_KEY+'_email', email);
-      localStorage.setItem(SYNC_KEY+'_session', JSON.stringify(r));
-      return true;
-    } catch(e) {
-      throw e;
-    }
-  },
-
-  async registerEmail(email, password) {
-    const r = await this._api('POST', '/signup', { email, password });
-    // Supabase returns user directly: { id, email, ... } or { user: {...}, session: {...} }
-    const user = r.user || (r.id ? r : null);
-    if (user) {
-      // 尝试自动登录（如果邮箱确认已关闭则直接成功）
-      try {
-        return await this.loginEmail(email, password);
-      } catch(e) {
-        // 如果邮箱确认开启，登录会失败。提示用户查收邮件。
-        throw new Error('请查收确认邮件后重试');
-      }
-    }
-    throw new Error('注册失败');
-  },
-
-  async forgotPassword(email) {
-    await this._api('POST', '/recover', { email });
-    return true;
-  },
-
-  async logout() {
-    if (this._session) {
-      try {
-        await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
-          method: 'POST', headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${this._session.access_token}` }
-        });
-      } catch(e) {}
-    }
-    this.mode = 'none';
-    this.email = '';
-    this._session = null;
-    localStorage.removeItem(SYNC_KEY+'_mode');
-    localStorage.removeItem(SYNC_KEY+'_email');
-    localStorage.removeItem(SYNC_KEY+'_session');
-    localStorage.removeItem(SYNC_KEY+'_code');
-  },
-
-  async changePassword(newPassword) {
-    if (!this._session) throw new Error('未登录');
-    await this._api('PUT', '/user', { password: newPassword }, true);
-    return true;
-  }
+  getSyncCode() { return localStorage.getItem(SYNC_KEY+'_code') || ''; },
+  setSyncCode(c) { localStorage.setItem(SYNC_KEY+'_code', c); },
+  isSync() { return !!this.getSyncCode(); }
 };
 
 // ==================== 通知 ====================
@@ -827,7 +728,7 @@ self.addEventListener('notificationclick', e => {
 
 // ==================== 主应用 ====================
 const App = {
-  view:'day', date:'', loggedIn:false,
+  view:'day', date:'',
 
   async init() {
     const t=new Date(); this.date=U.fmtDate(t);
@@ -836,19 +737,17 @@ const App = {
     Search.init();
     registerSW();
 
-    // 检查登录状态
-    this.loggedIn = Auth.init();
-    Cloud.init();
-    if (this.loggedIn) {
-      await Cloud.syncDown();
-      Cloud.startRealtime();
-      document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
-      document.getElementById('userBtn').classList.add('logged-in');
-      document.getElementById('syncStatus').style.display = '';
-      Notif.start();
-    } else {
-      // 显示登录/注册选择
-      this.showAuth();
+    // 直接进入，无需登录。数据存 localStorage。
+    document.getElementById('appView').style.display='';
+    document.getElementById('userBtn').textContent = '☁️ 同步 ▾';
+
+    // 如果之前绑定过同步码，后台静默同步
+    const prevSync = localStorage.getItem(SYNC_KEY+'_code');
+    if (prevSync) {
+      await Cloud.init();
+      document.getElementById('syncStatus').style.display='';
+      document.getElementById('syncStatus').textContent = '☁️ 已同步';
+      document.getElementById('syncStatus').classList.remove('offline');
     }
 
     // 视图切换
@@ -864,24 +763,11 @@ const App = {
 
     // 用户菜单
     document.getElementById('userBtn').addEventListener('click',()=>{
-      if (!this.loggedIn) { this.showAuth(); return; }
       document.getElementById('userDropdown').classList.toggle('show');
     });
-    document.getElementById('dropLogout').addEventListener('click',()=>{
-      Auth.logout(); this.loggedIn=false;
-      document.getElementById('userBtn').textContent='登录 ▾';
-      document.getElementById('userBtn').classList.remove('logged-in');
+    document.getElementById('dropSync').addEventListener('click',()=>{
       document.getElementById('userDropdown').classList.remove('show');
-      document.getElementById('syncStatus').style.display='none';
-      this.showAuth();
-    });
-    document.getElementById('dropChangePwd').addEventListener('click',()=>{
-      document.getElementById('userDropdown').classList.remove('show');
-      this.showChangePwd();
-    });
-    document.getElementById('dropAccount').addEventListener('click',()=>{
-      document.getElementById('userDropdown').classList.remove('show');
-      this.showAccountInfo();
+      this.showSyncDialog();
     });
     document.getElementById('dropNotif').addEventListener('click',()=>{
       document.getElementById('userDropdown').classList.remove('show');
@@ -917,172 +803,41 @@ const App = {
     }
   },
 
-  showAuth() {
-    const overlay = document.getElementById('authOverlay');
-    overlay.style.display = 'flex';
-    this.renderAuthMain();
-  },
-
-  renderAuthMain() {
-    const d = document.getElementById('authDialog');
-    d.innerHTML = `
-      <h2>🌰 toDoliSt</h2>
-      <div class="subtitle">多设备同步 · 简洁高效</div>
-      <div class="error-msg" id="authError"></div>
-      <input type="email" id="authEmail" placeholder="邮箱" autocomplete="email" />
-      <input type="password" id="authPwd" placeholder="密码（至少4位）" autocomplete="current-password" />
-      <button class="btn btn-primary" id="authLogin">登 录</button>
-      <button class="btn btn-secondary" id="authRegister">注 册</button>
-      <div class="switch-link" id="authForgot" style="margin-bottom:10px;">忘记密码？</div>
-      <div class="divider">或者</div>
-      <button class="btn btn-outline" id="authSyncCode">🔗 使用同步码</button>
-      <button class="btn btn-outline" id="authLocal">🏠 跳过，本地使用</button>
-    `;
-    const err = () => document.getElementById('authError');
-
-    document.getElementById('authLogin').addEventListener('click', async () => {
-      const em = document.getElementById('authEmail').value.trim();
-      const pw = document.getElementById('authPwd').value;
-      if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
-      if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
-      try { await Auth.loginEmail(em, pw); this.afterLogin(); }
-      catch(e) { err().textContent = '登录失败，检查邮箱密码'; }
-    });
-
-    document.getElementById('authRegister').addEventListener('click', async () => {
-      const em = document.getElementById('authEmail').value.trim();
-      const pw = document.getElementById('authPwd').value;
-      if (!em || !pw) { err().textContent = '请填写邮箱和密码'; return; }
-      if (pw.length < 4) { err().textContent = '密码至少4位'; return; }
-      try { await Auth.registerEmail(em, pw); err().textContent = ''; this.afterLogin(); }
-      catch(e) { err().textContent = e.message.includes('确认邮件') ? '已发送确认邮件，请查收后登录' : '注册失败：'+e.message.slice(0,60); }
-    });
-
-    document.getElementById('authForgot').addEventListener('click', () => this.renderForgotPwd());
-    document.getElementById('authSyncCode').addEventListener('click', () => this.renderSyncCode());
-    document.getElementById('authLocal').addEventListener('click', () => this.afterLocal());
-  },
-
-  renderForgotPwd() {
-    const d = document.getElementById('authDialog');
-    d.innerHTML = `
-      <h2>🔑 找回密码</h2>
-      <div class="subtitle">输入注册邮箱，我们会发送重置链接</div>
-      <div class="error-msg" id="authError"></div>
-      <div id="forgotOk" style="color:var(--chestnut-leaf);font-size:13px;margin-bottom:10px;display:none;">✅ 重置链接已发送，请查收邮件</div>
-      <input type="email" id="forgotEmail" placeholder="注册邮箱" autocomplete="email" />
-      <button class="btn btn-primary" id="doForgot">发送重置链接</button>
-      <div class="switch-link" id="forgotBack">← 返回登录</div>
-    `;
-    document.getElementById('forgotBack').addEventListener('click', () => this.renderAuthMain());
-    document.getElementById('doForgot').addEventListener('click', async () => {
-      const em = document.getElementById('forgotEmail').value.trim();
-      if (!em) { document.getElementById('authError').textContent = '请输入邮箱'; return; }
-      try {
-        await Auth.forgotPassword(em);
-        document.getElementById('authError').textContent = '';
-        document.getElementById('forgotOk').style.display = 'block';
-      } catch(e) { document.getElementById('authError').textContent = '发送失败：'+e.message.slice(0,60); }
-    });
-  },
-
-  renderSyncCode() {
-    const d = document.getElementById('authDialog');
-    const existing = localStorage.getItem(SYNC_KEY+'_code') || '';
-    d.innerHTML = `
-      <h2>🌰 同步码</h2>
-      <div class="subtitle">在另一设备输入相同同步码即可同步</div>
-      <div class="error-msg" id="authError"></div>
-      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" value="${existing}" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
-      <button class="btn btn-primary" id="syncJoin">加入同步</button>
-      <button class="btn btn-secondary" id="syncCreate">生成新同步码</button>
-      <div class="switch-link" id="syncBack">← 返回</div>
-    `;
-    document.getElementById('syncBack').addEventListener('click', () => this.renderAuthMain());
-    document.getElementById('syncJoin').addEventListener('click', async () => {
-      const code = document.getElementById('syncCodeInput').value.trim().toUpperCase();
-      if (code.length < 4) { document.getElementById('authError').textContent = '同步码至少4位'; return; }
-      localStorage.setItem(SYNC_KEY+'_code', code);
-      Auth.mode = 'sync';
-      localStorage.setItem(SYNC_KEY+'_mode','sync');
-      this.afterLogin();
-    });
-    document.getElementById('syncCreate').addEventListener('click', () => {
-      const code = Cloud.generateCode();
-      document.getElementById('syncCodeInput').value = code;
-      Auth.mode = 'sync';
-      localStorage.setItem(SYNC_KEY+'_mode','sync');
-      localStorage.setItem(SYNC_KEY+'_code', code);
-      this.afterLogin();
-    });
-  },
-
-  showChangePwd() {
-    const overlay = document.getElementById('authOverlay');
-    overlay.style.display = 'flex';
-    const d = document.getElementById('authDialog');
-    d.innerHTML = `
-      <h2>🔒 修改密码</h2>
-      <div class="subtitle">${Auth.email || ''}</div>
-      <div class="error-msg" id="authError"></div>
-      <input type="password" id="oldPwd" placeholder="旧密码" />
-      <input type="password" id="newPwd" placeholder="新密码（至少4位）" />
-      <button class="btn btn-primary" id="doChangePwd">确认修改</button>
-      <button class="btn btn-outline" id="cancelChange">取消</button>
-    `;
-    document.getElementById('cancelChange').addEventListener('click', () => { overlay.style.display='none'; });
-    document.getElementById('doChangePwd').addEventListener('click', async () => {
-      const np = document.getElementById('newPwd').value;
-      if (np.length < 4) { document.getElementById('authError').textContent='新密码至少4位'; return; }
-      await Auth.changePassword(np);
-      overlay.style.display = 'none';
-      alert('密码已修改');
-    });
-  },
-
-  showAccountInfo() {
+  showSyncDialog() {
     const overlay = document.getElementById('authOverlay');
     overlay.style.display = 'flex';
     const d = document.getElementById('authDialog');
     const code = localStorage.getItem(SYNC_KEY+'_code') || '';
     d.innerHTML = `
-      <h2>👤 账户信息</h2>
-      <div style="text-align:left;font-size:12px;color:var(--text-secondary);margin:12px 0;">
-        <p>📧 ${Auth.email || '同步码用户'}</p>
-        <p>🔗 同步码: <strong style="font-size:16px;">${code || '(无)'}</strong></p>
-        <p>☁️ 存储: Supabase</p>
-      </div>
-      ${code ? '<button class="btn btn-primary" id="copyCode">📋 复制同步码</button>' : ''}
-      <button class="btn btn-outline" id="closeAccount">关闭</button>
+      <h2>🌰 多设备同步</h2>
+      <div class="subtitle">在另一设备输入相同同步码即可同步</div>
+      <div class="error-msg" id="authError"></div>
+      <input type="text" id="syncCodeInput" placeholder="输入6位同步码" maxlength="6" value="${code}" style="text-transform:uppercase;letter-spacing:2px;font-size:18px;text-align:center;" />
+      <button class="btn btn-primary" id="syncJoin">加入同步</button>
+      <button class="btn btn-secondary" id="syncCreate">生成新同步码</button>
+      ${code ? '<div style="margin-top:10px;font-size:12px;color:var(--chestnut);">你的同步码: <strong>'+code+'</strong></div>' : ''}
+      <button class="btn btn-outline" id="syncClose" style="margin-top:8px;">关闭</button>
     `;
-    document.getElementById('closeAccount').addEventListener('click',()=>{overlay.style.display='none';});
-    if (code) {
-      document.getElementById('copyCode').addEventListener('click',()=>{
-        navigator.clipboard.writeText(code).then(()=>alert('同步码已复制！'));
-      });
-    }
-  },
-
-  async afterLogin() {
-    document.getElementById('authOverlay').style.display = 'none';
-    this.loggedIn = true;
-    document.getElementById('userBtn').textContent = (Auth.email || '同步用户') + ' ▾';
-    document.getElementById('userBtn').classList.add('logged-in');
-    // 云端同步
-    Cloud.init();
-    await Cloud.syncDown();
-    Cloud.startRealtime();
-    TaskList.load(); Calendar.refresh();
-    await Notif.request();
-    if(Notif.enabled) { document.getElementById('notifStatus').style.display=''; document.getElementById('notifStatus').textContent='🔔 通知已开启'; Notif.start(); }
-  },
-
-  afterLocal() {
-    document.getElementById('authOverlay').style.display = 'none';
-    this.loggedIn = false;
-    document.getElementById('userBtn').textContent = '登录 ▾';
-    document.getElementById('userBtn').classList.remove('logged-in');
-    TaskList.load(); Calendar.refresh();
+    document.getElementById('syncClose').addEventListener('click',()=>{overlay.style.display='none';});
+    document.getElementById('syncJoin').addEventListener('click', async () => {
+      const c = document.getElementById('syncCodeInput').value.trim().toUpperCase();
+      if (c.length < 4) { document.getElementById('authError').textContent = '同步码至少4位'; return; }
+      localStorage.setItem(SYNC_KEY+'_code', c);
+      overlay.style.display = 'none';
+      document.getElementById('syncStatus').style.display = '';
+      document.getElementById('syncStatus').textContent = '☁️ 已同步';
+      document.getElementById('syncStatus').classList.remove('offline');
+      try { await Cloud.init(); await Cloud.syncDown(); } catch(e) {}
+    });
+    document.getElementById('syncCreate').addEventListener('click', () => {
+      const c = Cloud.generateCode();
+      document.getElementById('syncCodeInput').value = c;
+      localStorage.setItem(SYNC_KEY+'_code', c);
+      overlay.style.display = 'none';
+      document.getElementById('syncStatus').style.display = '';
+      document.getElementById('syncStatus').textContent = '☁️ 已同步';
+      document.getElementById('syncStatus').classList.remove('offline');
+    });
   },
 
   switchView(v) {
