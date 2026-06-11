@@ -9,15 +9,7 @@
 
 🔗 [chestnut1002.github.io/todo-staging/](https://chestnut1002.github.io/todo-staging/)
 
-## 功能预览 Screenshots
 
-<!-- TODO: 添加应用截图。运行应用后截图替换此处 -->
-<!-- TODO: Add app screenshots here after running the app -->
-| 主界面 | 搜索 | 移动端 |
-|--------|------|--------|
-| ![主界面](assets/screenshot-main.png) | ![搜索](assets/screenshot-search.png) | ![移动端](assets/screenshot-mobile.png) |
-
----
 
 ## 功能特性 Features
 
