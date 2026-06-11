@@ -14,28 +14,18 @@
 ```
 win-todo/
 ├── index.html               # 主应用（单文件，包含全部 HTML/CSS/JS）
+├── README.md                # 项目说明
+├── LICENSE                  # MIT 开源协议
 ├── CLAUDE.md                # AI 助手指引
+├── AGENTS.md                # AI 助手指引
 ├── docs/                    # 项目规范文档
 │   ├── requirements.md      # 需求文档
 │   ├── tech.md              # 技术规范（本文件）
 │   ├── design.md            # 设计规范
 │   └── steps.md             # 执行步骤
-├── devlog/                  # 开发日志
-│   ├── 2026-06-09.md
-│   └── 2026-06-10.md
-├── assets/                  # 静态资源
-├── renderer/                # Electron 版源码（已弃用，保留参考）
-│   ├── index.html
-│   ├── styles.css
-│   ├── app.js
-│   ├── calendar.js
-│   ├── task-list.js
-│   ├── search.js
-│   └── db.js
-├── main.js                  # Electron 主进程（已弃用）
-├── preload.js               # Electron 预加载（已弃用）
-├── package.json             # Electron 依赖配置（已弃用）
-└── electron-builder.yml     # Electron 打包配置（已弃用）
+└── devlog/                  # 开发日志
+    ├── 2026-06-09.md
+    └── 2026-06-10.md
 ```
 
 ## 架构设计
@@ -48,10 +38,11 @@ win-todo/
   - **Calendar** — 月历组件
   - **TaskList** — 任务列表 + 渐隐动画
   - **Search** — 搜索功能
-  - **App** — 主逻辑 + 视图切换
+  - **Notif** — 浏览器通知（截止日期提醒）
+  - **App** — 主逻辑 + 视图切换 + 拖拽排序
 
 ### 数据存储
-- 使用 `localStorage`，key 为 `win-todo-tasks`
+- 使用 `localStorage`，key 为 `todolist_local`
 - 数据格式：JSON 数组
 - 每个任务对象结构：
 
@@ -72,3 +63,10 @@ win-todo/
 - CSS 使用 CSS 变量定义主题色
 - 所有 UI 交互优先使用 CSS transition/animation
 - 数据操作统一通过 `Storage` 对象
+
+## 架构演进
+
+项目最初设计为 Electron 桌面应用（Electron + sql.js），但在 Windows 上遇到 Electron 37 模块解析问题后，改为纯网页方案。废弃的 Electron 代码可通过 git 历史查看（commit `0d01ac2`）。
+
+- **v1**：Electron + sql.js + renderer/ 多文件架构（已废弃）
+- **v2**：纯网页单文件 + localStorage + PWA + 通知（当前版本）
